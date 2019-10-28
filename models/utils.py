@@ -1,10 +1,10 @@
 import os, gzip, torch
 import torch.nn as nn
 import numpy as np
-import scipy.misc
 import imageio
 import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
+import cv2
 
 def load_mnist(dataset):
     data_dir = os.path.join("./data", dataset)
@@ -78,7 +78,7 @@ def save_images(images, size, image_path):
 
 def imsave(images, size, path):
     image = np.squeeze(merge(images, size))
-    return scipy.misc.imsave(path, image)
+    return cv2.imwrite(path, (image+1.0)*127.5)
 
 def merge(images, size):
     h, w = images.shape[1], images.shape[2]

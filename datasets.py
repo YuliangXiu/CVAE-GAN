@@ -19,7 +19,7 @@ im_trans = transforms.Compose([
 
 
 class BodyMapDataset(Dataset):
-    def __init__(self, data_root, dataset, phase='train', train_test_split=0.98, dim=512, max_size=-1, device=None, transform=im_trans):
+    def __init__(self, data_root, dataset, phase='train', train_test_split=0.98, dim=512, max_size=-1, device=None, transform=im_trans, cls_num=10):
         
         super(BodyMapDataset, self).__init__()
         # Set image transforms and device
@@ -28,6 +28,7 @@ class BodyMapDataset(Dataset):
         self.phase = phase
         self.pix_dim = (dim, dim, 3)
         self.labeldim = 1
+        self.cls_num = cls_num
 
         self.im_root = os.path.join(data_root, dataset)
         if not os.path.isdir(self.im_root):
@@ -35,7 +36,7 @@ class BodyMapDataset(Dataset):
                 'please run "data_washing.py" first'))
         
         # Prepare train/test split
-        self.names = np.loadtxt(os.path.join(data_root, '../input_%s.txt'%(dataset)), dtype=str)
+        self.names = np.loadtxt(os.path.join(data_root, 'input_%s.txt'%(dataset)), dtype=str)
         self.len =  len(self.names)
         self.split = train_test_split
         split_point = int(train_test_split * self.len)
@@ -53,8 +54,11 @@ class BodyMapDataset(Dataset):
 
         out_dict = {}
         img = self.transform(resize(imread(self.im_names[id]), self.pix_dim[:-1]))
-        label = int(self.names[id].split("_")[1])
-        return img, label
+        label = torch.Tensor([(int(self.names[id].split("_")[1])-1)//100]).type(torch.LongTensor)
+        y = torch.zeros(1, self.cls_num)
+        y[range(y.shape[0]), label]=1
+
+        return img, y.squeeze(0)
         
     def __len__(self):
         return len(self.names)

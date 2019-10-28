@@ -26,9 +26,13 @@ class decoder(nn.Module):
 
         self.decoder = ConvUpSampleDecoder(self.pix_dim, self.in_dim, 64, 4, self.norm_layer, self.nl_layer)
         init_net(self.decoder, 'kaiming')
-
-    def forward(self, input, label):
+      
+    def forward(self, input, label, phase='train'):
         x = torch.cat([input, label], dim=1)
+        if phase == 'test':
+            self.decoder = self.decoder.to('cpu')
+        else:
+            self.decoder = self.decoder.to('cuda')
         x = self.decoder(x)
 
         return x
@@ -39,7 +43,7 @@ class encoder(nn.Module):
     def __init__(self, args, dataset = '1101'):
         super(encoder, self).__init__()
 
-        self.z_dim = args.z_dim
+        self.z_dim = args.z_dim * 2
         self.norm_layer = get_norm_layer(layer_type='batch')
         self.nl_layer = get_non_linearity(layer_type='lrelu')
         self.pix_dim = args.pix_dim
@@ -60,18 +64,23 @@ class CVAE_T(torch.nn.Module):
         self.z_dim = args.z_dim
         self.encoder = encoder
         self.decoder = decoder
+        self.device = args.device
 
     def _sample_latent(self, h_enc):
         """
         Return the latent normal sample z ~ N(mu, sigma^2)
         """
+        # print(h_enc.shape)
         mu = h_enc[:, :self.z_dim]
         log_sigma = h_enc[:, self.z_dim:]
         sigma = torch.exp(log_sigma)
-        std_z = torch.from_numpy(np.random.normal(0, 1, size=sigma.size())).to(self.device)
+        std_z = torch.from_numpy(np.random.normal(0, 1, size=sigma.size())).type(torch.FloatTensor).to(self.device)
 
         self.z_mean = mu
         self.z_sigma = sigma
+
+        # print(self.device, type(mu), type(sigma), type(std_z))
+        # print(mu.shape, sigma.shape, std_z.shape)
 
         return mu + sigma * std_z
 
@@ -98,11 +107,12 @@ class CVAE(object):
         self.device = args.device
         self.y_dim = args.y_dim
         self.z_dim = args.z_dim
+        self.pix_dim = args.pix_dim
 
         # data process
         # Load datasets
-        self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, phase='train', max_size=args.data_size, dim=args.pix_dim)
-        self.test_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, phase='test', max_size=args.data_size, dim=args.pix_dim)
+        self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, phase='train', max_size=args.data_size, dim=args.pix_dim, cls_num=args.y_dim)
+        self.test_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, phase='test', max_size=args.data_size, dim=args.pix_dim, cls_num=args.y_dim)
 
         print("Trainset: %d | Testset: %d \n"%(len(self.train_data), len(self.test_data)))
 
@@ -129,7 +139,7 @@ class CVAE(object):
 
         # to device
         self.CVAE.to(self.device)
-        self.BCE_loss = nn.BCELoss().to(self.device)
+        self.L1_loss = nn.L1Loss().to(self.device)
 
         # load dataset
         self.z_n = utils.gaussian(1, self.z_dim)
@@ -149,16 +159,15 @@ class CVAE(object):
         for i in range(self.sample_num):
             temp_y[i * self.y_dim: (i + 1) * self.y_dim] = temp
 
-        target = torch.randint(high=self.y_dim-1, size=(1, self.batch_size))
-        y = torch.zeros(self.batch_size, self.y_dim)
-        y[range(y.shape[0]), target]=1
+        # target = torch.randint(high=self.y_dim-1, size=(1, self.batch_size))
+        # y = torch.zeros(self.sample_num* self.y_dim, self.y_dim)
+        # y[range(y.shape[0]), target]=1
         
-        with torch.no_grad():
-            self.sample_y_ = torch.zeros((self.sample_num, self.y_dim)).to(self.device)
-            self.sample_y_.scatter_(1, temp_y.type(torch.LongTensor), 1).to(self.device)
-            self.test_labels = y.to(self.device)
+        self.sample_y_ = torch.zeros((self.sample_num* self.y_dim, self.y_dim))
+        self.sample_y_.scatter_(1, temp_y.type(torch.LongTensor), 1)
+            # self.test_labels = y
             
-        self.fill = torch.zeros([self.y_dim, self.y_dim, self.pix_dim, self.pix_dim])
+        self.fill = torch.zeros((self.y_dim, self.y_dim, self.pix_dim, self.pix_dim))
         for i in range(self.y_dim):
             self.fill[i, i, :, :] = 1
 
@@ -186,7 +195,7 @@ class CVAE(object):
                 dec = self.CVAE(x_, y_fill_, y_vec_)
                 self.CVAE_optimizer.zero_grad()
                 KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)
-                LL_loss = self.BCE_loss(dec, x_)
+                LL_loss = self.L1_loss(dec, x_)
                 VAE_loss = LL_loss + KL_loss
 
                 self.train_hist['VAE_loss'].append(VAE_loss.item())
@@ -200,13 +209,12 @@ class CVAE(object):
                     print("Epoch: [%2d] [%4d/%4d] time: %4.4f VAE_loss: %.8f" %
                           ((epoch + 1), (iter + 1), len(self.train_data) // self.batch_size, time.time() - start_time,
                            VAE_loss.item()))
-                if np.mod((iter + 1), 300) == 0:
-                    samples = self.De(self.sample_z_, self.test_labels)
-                    if self.gpu_mode:
-                        samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
-                    else:
-                        samples = samples.numpy().transpose(0, 2, 3, 1)
-                    tot_num_samples = 64
+                if np.mod((iter + 1), 200) == 0:
+                    # print("saving results images...")
+                    with torch.no_grad():
+                        samples = self.De(self.sample_z_, self.sample_y_, 'test')
+                    samples = samples.numpy().transpose(0, 2, 3, 1)
+                    tot_num_samples = 100
                     manifold_h = int(np.floor(np.sqrt(tot_num_samples)))
                     manifold_w = int(np.floor(np.sqrt(tot_num_samples)))
                     utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w],
@@ -222,8 +230,8 @@ class CVAE(object):
         print("Training finish!... save training results")
 
         self.save()
-        utils.generate_animation(self.result_dir + '/' + self.model_dir + '/' + self.model_name, self.epoch)
-        utils.generate_train_animation(self.result_dir + '/' + self.model_dir + '/' + self.model_name, self.epoch)
+        utils.generate_animation(self.result_dir + '/'+ self.model_name, self.epoch)
+        utils.generate_train_animation(self.result_dir + '/'+ self.model_name, self.epoch)
         utils.loss_VAE_plot(self.train_hist, os.path.join(self.save_dir, self.model_dir), self.model_name)
 
     def visualize_results(self, epoch, fix=True):
@@ -243,7 +251,7 @@ class CVAE(object):
             sample_y_.scatter_(1, temp, 1)
 
             with torch.no_grad():
-                sample_z_ = torch.from_numpy(self.z_n).type(torch.FloatTensor).to(self.device)
+                sample_z_ = torch.from_numpy(self.z_n).to(self.device)
                 sample_y_.to(self.device)
 
             samples = self.De(sample_z_, sample_y_)

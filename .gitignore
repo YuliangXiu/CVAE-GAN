@@ -10,8 +10,14 @@ result*
 datasets/files/*
 *.jpg
 *.png
+*.pth
+*.pkl
 graimg/
 gra_out/
 mnist_out/
+data/
+checkpoint/
+result/
+.vscode/
 __pycache__/
 models/*.h5py
