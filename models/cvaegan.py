@@ -1,406 +1,281 @@
-import os
+import torch, time, os, pickle
 import numpy as np
-
-import keras
-from keras.engine.topology import Layer
-from keras.models import Model
-from keras.layers import Input, Flatten, Dense, Lambda, Reshape, Concatenate
-from keras.layers import Activation, LeakyReLU, ELU
-from keras.layers import Conv2D, Conv2DTranspose, UpSampling2D, BatchNormalization, GlobalAveragePooling2D
-from keras.optimizers import Adam
-from keras import backend as K
-from keras.applications.vgg16 import VGG16
-from keras.models import load_model
-
-from .base import BaseModel
-from .layers import *
-from .utils import set_trainable, zero_loss, sample_normal, time_format
-
-
-class ClassifierLossLayer(Layer):
-    __name__ = 'classifier_loss_layer'
-
-    def __init__(self, **kwargs):
-        self.is_placeholder = True
-        super(ClassifierLossLayer, self).__init__(**kwargs)
-
-    def lossfun(self, c_true, c_pred):
-        return K.mean(keras.metrics.categorical_crossentropy(c_true, c_pred))
-
-    def call(self, inputs):
-        c_true = inputs[0]
-        c_pred = inputs[1]
-        loss = self.lossfun(c_true, c_pred)
-        self.add_loss(loss, inputs=inputs)
-
-        return c_true
-
-class DiscriminatorLossLayer(Layer):
-    __name__ = 'discriminator_loss_layer'
-
-    def __init__(self, **kwargs):
-        self.is_placeholder = True
-        super(DiscriminatorLossLayer, self).__init__(**kwargs)
-
-    def lossfun(self, y_real, y_fake_f, y_fake_p):
-        y_pos = K.ones_like(y_real)
-        y_neg = K.zeros_like(y_real)
-        loss_real = keras.metrics.binary_crossentropy(y_pos, y_real)
-        loss_fake_f = keras.metrics.binary_crossentropy(y_neg, y_fake_f)
-        loss_fake_p = keras.metrics.binary_crossentropy(y_neg, y_fake_p)
-        return K.mean(loss_real + loss_fake_f + loss_fake_p)
-
-    def call(self, inputs):
-        y_real = inputs[0]
-        y_fake_f = inputs[1]
-        y_fake_p = inputs[2]
-        loss = self.lossfun(y_real, y_fake_f, y_fake_p)
-        self.add_loss(loss, inputs=inputs)
-
-        return y_real
-
-class GeneratorLossLayer(Layer):
-    __name__ = 'generator_loss_layer'
-
-    def __init__(self, **kwargs):
-        self.is_placeholder = True
-        super(GeneratorLossLayer, self).__init__(**kwargs)
-
-    def lossfun(self, x_r, x_f, f_D_x_f, f_D_x_r, f_C_x_r, f_C_x_f):
-        loss_x = K.mean(K.square(x_r - x_f))
-        loss_d = K.mean(K.square(f_D_x_r - f_D_x_f))
-        loss_c = K.mean(K.square(f_C_x_r - f_C_x_f))
-
-        return loss_x + loss_d + loss_c
-
-    def call(self, inputs):
-        x_r = inputs[0]
-        x_f = inputs[1]
-        f_D_x_r = inputs[2]
-        f_D_x_f = inputs[3]
-        f_C_x_r = inputs[4]
-        f_C_x_f = inputs[5]
-        loss = self.lossfun(x_r, x_f, f_D_x_r, f_D_x_f, f_C_x_r, f_C_x_f)
-        self.add_loss(loss, inputs=inputs)
-
-        return x_r
-
-class FeatureMatchingLayer(Layer):
-    __name__ = 'feature_matching_layer'
-
-    def __init__(self, **kwargs):
-        self.is_placeholder = True
-        super(FeatureMatchingLayer, self).__init__(**kwargs)
-
-    def lossfun(self, f1, f2):
-        f1_avg = K.mean(f1, axis=0)
-        f2_avg = K.mean(f2, axis=0)
-        return 10**-3 * 0.5 * K.mean(K.square(f1_avg - f2_avg))
-
-    def call(self, inputs):
-        f1 = inputs[0]
-        f2 = inputs[1]
-        loss = self.lossfun(f1, f2)
-        self.add_loss(loss, inputs=inputs)
-
-        return f1
-
-class KLLossLayer(Layer):
-    __name__ = 'kl_loss_layer'
-
-    def __init__(self, **kwargs):
-        self.is_placeholder = True
-        super(KLLossLayer, self).__init__(**kwargs)
-
-    def lossfun(self, z_avg, z_log_var):
-        kl_loss = -0.5 * K.mean(1.0 + z_log_var - K.square(z_avg) - K.exp(z_log_var))
-        return 3 * kl_loss
-
-    def call(self, inputs):
-        z_avg = inputs[0]
-        z_log_var = inputs[1]
-        loss = self.lossfun(z_avg, z_log_var)
-        self.add_loss(loss, inputs=inputs)
-
-        return z_avg
-
-def discriminator_accuracy(x_r, x_f, x_p):
-    def accfun(y0, y1):
-        x_pos = K.ones_like(x_r)
-        x_neg = K.zeros_like(x_r)
-        loss_r = K.mean(keras.metrics.binary_accuracy(x_pos, x_r))
-        loss_f = K.mean(keras.metrics.binary_accuracy(x_neg, x_f))
-        loss_p = K.mean(keras.metrics.binary_accuracy(x_neg, x_p))
-        return (1.0 / 3.0) * (loss_r + loss_p + loss_f)
-
-    return accfun
-
-def generator_accuracy(x_p, x_f):
-    def accfun(y0, y1):
-        x_pos = K.ones_like(x_p)
-        loss_p = K.mean(keras.metrics.binary_accuracy(x_pos, x_p))
-        loss_f = K.mean(keras.metrics.binary_accuracy(x_pos, x_f))
-        return 0.5 * (loss_p + loss_f)
-
-    return accfun
-
-class CVAEGAN(BaseModel):
-    def __init__(self,
-        input_shape=(128, 128, 3),
-        num_attrs=2,
-        z_dims = 64,
-        **kwargs
-    ):
-        super(CVAEGAN, self).__init__(input_shape=input_shape, **kwargs)
-
-        self.input_shape = input_shape
-        self.num_attrs = num_attrs
-        self.z_dims = z_dims
-
-        self.f_enc = None
-        self.f_dec = None
-        self.f_dis = None
-        self.f_cls = None
-        self.enc_trainer = None
-        self.dec_trainer = None
-        self.dis_trainer = None
-        self.cls_trainer = None
-
-        self.build_model()
-
-    def train_on_batch(self, x_batch):
-        x_r, c = x_batch
-
-        batchsize = len(x_r)
-        z_p = np.random.normal(size=(batchsize, self.z_dims)).astype('float32')
-
-        x_dummy = np.zeros(x_r.shape, dtype='float32')
-        c_dummy = np.zeros(c.shape, dtype='float32')
-        z_dummy = np.zeros(z_p.shape, dtype='float32')
-        y_dummy = np.zeros((batchsize, 1), dtype='float32')
-        f_dummy = np.zeros((batchsize, 8192), dtype='float32')
-
-        # Train autoencoder
-        self.enc_trainer.train_on_batch([x_r, c, z_p], [x_dummy, z_dummy])
-
-        # Train generator
-        g_loss, _, _, _, _, _, g_acc = self.dec_trainer.train_on_batch([x_r, c, z_p], [x_dummy, f_dummy, f_dummy])
-
-        # Train classifier
-        self.cls_trainer.train_on_batch([x_r, c], c_dummy)
-
-        # Train discriminator
-        d_loss, d_acc = self.dis_trainer.train_on_batch([x_r, c, z_p], y_dummy)
-
-        loss = {
-            'g_loss': g_loss,
-            'd_loss': d_loss,
-            'g_acc': g_acc,
-            'd_acc': d_acc
-        }
-        return loss
-
-    def predict(self, z_samples):
-        return self.f_dec.predict(z_samples)
-
-    def build_model(self):
-        self.f_enc = self.build_encoder(output_dims=self.z_dims*2)
-        self.f_dec = self.build_decoder()
-        self.f_dis = self.build_discriminator()
-        self.f_cls = self.build_classifier()
-
-        # Algorithm
-        x_r = Input(shape=self.input_shape)
-        c = Input(shape=(self.num_attrs,))
-        z_params = self.f_enc([x_r, c]) #TODO:dim of z shold be checked
-
-        z_avg = Lambda(lambda x: x[:, :self.z_dims], output_shape=(self.z_dims,))(z_params)
-        z_log_var = Lambda(lambda x: x[:, self.z_dims:], output_shape=(self.z_dims,))(z_params) #TODO: check "x"
-        z = Lambda(sample_normal, output_shape=(self.z_dims,))([z_avg, z_log_var])
-
-        kl_loss = KLLossLayer()([z_avg, z_log_var])
-
-        z_p = Input(shape=(self.z_dims,))
-
-        x_f = self.f_dec([z, c])
-        x_p = self.f_dec([z_p, c])
-
-        y_r, f_D_x_r = self.f_dis(x_r)
-        y_f, f_D_x_f = self.f_dis(x_f)
-        y_p, f_D_x_p = self.f_dis(x_p)
-
-        d_loss = DiscriminatorLossLayer()([y_r, y_f, y_p])
-
-        c_r, f_C_x_r = self.f_cls(x_r)
-        c_f, f_C_x_f = self.f_cls(x_f)
-        c_p, f_C_x_p = self.f_cls(x_p)
-
-        g_loss = GeneratorLossLayer()([x_r, x_f, f_D_x_r, f_D_x_f, f_C_x_r, f_C_x_f])
-        gd_loss = FeatureMatchingLayer()([f_D_x_r, f_D_x_p])
-        gc_loss = FeatureMatchingLayer()([f_C_x_r, f_C_x_p])
-
-        c_loss = ClassifierLossLayer()([c, c_r])
-
-        # Build classifier trainer
-        set_trainable(self.f_enc, False)
-        set_trainable(self.f_dec, False)
-        set_trainable(self.f_dis, False)
-        set_trainable(self.f_cls, True)
-
-        self.cls_trainer = Model(inputs=[x_r, c],
-                                 outputs=[c_loss])
-        self.cls_trainer.compile(loss=[zero_loss],
-                                 optimizer=Adam(lr=2.0e-4, beta_1=0.5))
-        self.cls_trainer.summary()
-
-        # Build discriminator trainer
-        set_trainable(self.f_enc, False)
-        set_trainable(self.f_dec, False)
-        set_trainable(self.f_dis, True)
-        set_trainable(self.f_cls, False)
-
-        self.dis_trainer = Model(inputs=[x_r, c, z_p],
-                                 outputs=[d_loss])
-        self.dis_trainer.compile(loss=[zero_loss],
-                                 optimizer=Adam(lr=2.0e-4, beta_1=0.5),
-                                 metrics=[discriminator_accuracy(y_r, y_f, y_p)])
-        self.dis_trainer.summary()
-
-        # Build generator trainer
-        set_trainable(self.f_enc, False)
-        set_trainable(self.f_dec, True)
-        set_trainable(self.f_dis, False)
-        set_trainable(self.f_cls, False)
-
-        self.dec_trainer = Model(inputs=[x_r, c, z_p],
-                                 outputs=[g_loss, gd_loss, gc_loss])
-        self.dec_trainer.compile(loss=[zero_loss, zero_loss, zero_loss],
-                                 optimizer=Adam(lr=2.0e-4, beta_1=0.5),
-                                 metrics=[generator_accuracy(y_p, y_f)])
-
-        # Build autoencoder
-        set_trainable(self.f_enc, True)
-        set_trainable(self.f_dec, False)
-        set_trainable(self.f_dis, False)
-        set_trainable(self.f_cls, False)
-
-        self.enc_trainer = Model(inputs=[x_r, c, z_p],
-                                outputs=[g_loss, kl_loss])
-        self.enc_trainer.compile(loss=[zero_loss, zero_loss],
-                                optimizer=Adam(lr=2.0e-4, beta_1=0.5))
-        self.enc_trainer.summary()
-
-        # Store trainers
-        self.store_to_save('cls_trainer')
-        self.store_to_save('dis_trainer')
-        self.store_to_save('dec_trainer')
-        self.store_to_save('enc_trainer')
-
-    def build_encoder(self, output_dims):
-        """Originally network E is a GoogleNet, categorical information is mereged at the last FC layer of the E network
-        """
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+from datasets import BodyMapDataset
+from torch.utils.data import DataLoader
+from torch.nn import init
+from torch.optim import lr_scheduler
+from cv2 import imread, imwrite, connectedComponents
+from torchsummary import summary
+from models.networks import *
+from models import utils
+
+class decoder(nn.Module):
+    # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
+    # Architecture : FC1024_BR-FC7x7x128_BR-(64)4dc2s_BR-(1)4dc2s_S
+    def __init__(self, args, dataset='1101'):
+        super(decoder, self).__init__()
+        self.z_dim = args.z_dim
+        self.norm_layer = get_norm_layer(layer_type='batch')
+        self.nl_layer = get_non_linearity(layer_type='lrelu')
+        self.pix_dim = args.pix_dim
+        self.in_dim = args.z_dim + args.y_dim
+
+        self.decoder = ConvUpSampleDecoder(self.pix_dim, self.in_dim, 64, 4, self.norm_layer, self.nl_layer)
+        init_net(self.decoder, 'kaiming')
+
+    def forward(self, input, label):
+        x = torch.cat([input, label], dim=1)
+        x = self.decoder(x)
+
+        return x
+
+class encoder(nn.Module):
+    # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
+    # Architecture : (64)4c2s-(128)4c2s_BL-FC1024_BL-FC1_S
+    def __init__(self, args, dataset = '1101'):
+        super(encoder, self).__init__()
+
+        self.z_dim = args.z_dim
+        self.norm_layer = get_norm_layer(layer_type='batch')
+        self.nl_layer = get_non_linearity(layer_type='lrelu')
+        self.pix_dim = args.pix_dim
+        self.in_dim = 3 + args.y_dim
+
+        self.encoder = ResNetEncoder(self.pix_dim, self.in_dim, self.z_dim, 64, 4, self.norm_layer, self.nl_layer)
+        init_net(self.encoder, 'kaiming')
+
+    def forward(self, input, label):
+        x = torch.cat([input, label], dim=1)
+        x = self.encoder(x)
+
+        return x
         
-        def get_VGG16():
-            model_path = "./models/vgg16.h5py"
-            if not os.path.exists(model_path):
-                model = VGG16(weights="imagenet", include_top=False)
-                model.save(model_path)
-            else:
-                model = load_model(model_path)
+class CVAE_T(torch.nn.Module):
+    def __init__(self, args, encoder, decoder):
+        super(CVAE_T, self).__init__()
+        self.z_dim = args.z_dim
+        self.encoder = encoder
+        self.decoder = decoder
+
+    def _sample_latent(self, h_enc):
+        """
+        Return the latent normal sample z ~ N(mu, sigma^2)
+        """
+        mu = h_enc[:, :self.z_dim]
+        log_sigma = h_enc[:, self.z_dim:]
+        sigma = torch.exp(log_sigma)
+        std_z = torch.from_numpy(np.random.normal(0, 1, size=sigma.size())).to(self.device)
+
+        self.z_mean = mu
+        self.z_sigma = sigma
+
+        return mu + sigma * std_z
+
+    def forward(self, state, label1, label2):
+        h_enc = self.encoder(state, label1)
+        z = self._sample_latent(h_enc)
+        return self.decoder(z, label2)
+
+def latent_loss(z_mean, z_stddev):
+    mean_sq = z_mean * z_mean
+    stddev_sq = z_stddev * z_stddev
+    return 0.5 * torch.mean(mean_sq + stddev_sq - torch.log(stddev_sq) - 1)
+
+class CVAE(object):
+    def __init__(self, args):
+        # parameters
+        self.epoch = args.epoch
+        self.sample_num = 10
+        self.batch_size = args.batch_size
+        self.save_dir = args.save_dir
+        self.result_dir = args.result_dir
+        self.dataset = args.dataset
+        self.model_name = args.gan_type
+        self.device = args.device
+        self.y_dim = args.y_dim
+        self.z_dim = args.z_dim
+
+        # data process
+        # Load datasets
+        self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, phase='train', max_size=args.data_size, dim=args.pix_dim)
+        self.test_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, phase='test', max_size=args.data_size, dim=args.pix_dim)
+
+        print("Trainset: %d | Testset: %d \n"%(len(self.train_data), len(self.test_data)))
+
+        self.trainset_loader = DataLoader(
+            dataset=self.train_data,
+            batch_size=args.batch_size,
+            drop_last=True,
+            shuffle=True,
+            num_workers=args.worker
+        )
+        self.testset_loader = DataLoader(
+            dataset=self.test_data,
+            batch_size=args.batch_size,
+            drop_last=True,
+            shuffle=True,
+            num_workers=args.worker
+        )
+
+        # networks init
+        self.En = encoder(args, self.dataset)
+        self.De = decoder(args, self.dataset)
+        self.CVAE = CVAE_T(args, self.En, self.De)
+        self.CVAE_optimizer = optim.Adam(self.CVAE.parameters(),lr=args.lrG, betas=(0.5, 0.999))
+
+        # to device
+        self.CVAE.to(self.device)
+        self.BCE_loss = nn.BCELoss().to(self.device)
+
+        # load dataset
+        self.z_n = utils.gaussian(1, self.z_dim)
+
+        # fixed noise & condition
+        # self.sample_z_.shape (100, 62) noise
+        self.sample_z_ = torch.zeros((self.sample_num * self.y_dim, self.z_dim))
+        for i in range(self.sample_num):
+            self.sample_z_[i * self.y_dim] = torch.from_numpy(self.z_n)
+            for j in range(1, self.y_dim):
+                self.sample_z_[i * self.y_dim + j] = self.sample_z_[i * self.y_dim]
+
+        # self.sample_y_.shape (100, 1)
+        temp = torch.linspace(0, self.y_dim-1, self.y_dim).reshape(-1,1)
+
+        temp_y = torch.zeros((self.sample_num * self.y_dim, 1))
+        for i in range(self.sample_num):
+            temp_y[i * self.y_dim: (i + 1) * self.y_dim] = temp
+
+        target = torch.randint(high=self.y_dim-1, size=(1, self.batch_size))
+        y = torch.zeros(self.batch_size, self.y_dim)
+        y[range(y.shape[0]), target]=1
+        
+        with torch.no_grad():
+            self.sample_y_ = torch.zeros((self.sample_num, self.y_dim)).to(self.device)
+            self.sample_y_.scatter_(1, temp_y.type(torch.LongTensor), 1).to(self.device)
+            self.test_labels = y.to(self.device)
             
-            for i, layer in enumerate(model.layers):
-                if i < 21:
-                    layer.trainable = False
-                else:
-                    layer.trainable = True
+        self.fill = torch.zeros([self.y_dim, self.y_dim, self.pix_dim, self.pix_dim])
+        for i in range(self.y_dim):
+            self.fill[i, i, :, :] = 1
 
-            return model
+    def train(self):
+        self.train_hist = {}
+        self.train_hist['VAE_loss'] = []
+        self.train_hist['KL_loss'] = []
+        self.train_hist['LL_loss'] = []
+        self.train_hist['per_epoch_time'] = []
+        self.train_hist['total_time'] = []
 
+        self.CVAE.train()
+        print('training start!!')
+        start_time = time.time()
+        for epoch in range(self.epoch):
+            self.En.train()
+            epoch_start_time = time.time()
+            for iter, (imgs, labels) in enumerate(self.trainset_loader):
 
-        x_inputs = Input(shape=self.input_shape)
-        base_model = get_VGG16()
+                x_ = imgs.to(self.device)
+                y_vec_ = labels.to(self.device)
+                y_fill_ = self.fill[torch.max(y_vec_, 1)[1].squeeze()].to(self.device)
+             
+                # update VAE network
+                dec = self.CVAE(x_, y_fill_, y_vec_)
+                self.CVAE_optimizer.zero_grad()
+                KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)
+                LL_loss = self.BCE_loss(dec, x_)
+                VAE_loss = LL_loss + KL_loss
 
-        x = base_model(x_inputs)
-        x = Flatten()(x)
+                self.train_hist['VAE_loss'].append(VAE_loss.item())
+                self.train_hist['KL_loss'].append(KL_loss.item())
+                self.train_hist['LL_loss'].append(LL_loss.item())
 
-        c_inputs = Input(shape=(self.num_attrs,))
-        x = Concatenate(axis=-1)([x, c_inputs])
+                VAE_loss.backward()
+                self.CVAE_optimizer.step()
 
-        x = Dense(1024)(x)
-        x = LeakyReLU(0.3)(x) 
-        
-        x = Dense(output_dims)(x)
-        x = Activation("linear")(x)
+                if ((iter + 1) % 100) == 0:
+                    print("Epoch: [%2d] [%4d/%4d] time: %4.4f VAE_loss: %.8f" %
+                          ((epoch + 1), (iter + 1), len(self.train_data) // self.batch_size, time.time() - start_time,
+                           VAE_loss.item()))
+                if np.mod((iter + 1), 300) == 0:
+                    samples = self.De(self.sample_z_, self.test_labels)
+                    if self.gpu_mode:
+                        samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
+                    else:
+                        samples = samples.numpy().transpose(0, 2, 3, 1)
+                    tot_num_samples = 64
+                    manifold_h = int(np.floor(np.sqrt(tot_num_samples)))
+                    manifold_w = int(np.floor(np.sqrt(tot_num_samples)))
+                    utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w],
+                                utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.model_name +
+                                '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
 
-        return Model([x_inputs, c_inputs], x)
+            self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
+            self.visualize_results((epoch+1))
 
-    def build_decoder(self):
-        """
-        2 fully conected network followed by 6 deconv layers with 2-by-2 upsampling. The convolution layers have 256, 256, 128, 92, 64 and 3 channels with filter size of 3*3, 3*3, 5*5, 5*5, 5*5, 5*5.
-        """
-        z_inputs = Input(shape=(self.z_dims,))
-        c_inputs = Input(shape=(self.num_attrs,))
-        z = Concatenate()([z_inputs, c_inputs])
+        self.train_hist['total_time'].append(time.time() - start_time)
+        print("Avg one epoch time: %.2f, total %d epochs time: %.2f" % (np.mean(self.train_hist['per_epoch_time']),
+              self.epoch, self.train_hist['total_time'][0]))
+        print("Training finish!... save training results")
 
-        w = self.input_shape[0] // (2 ** 4)
-        x = Dense(w * w * 512)(z)
-        x = BatchNormalization()(x)
-        x = Activation('relu')(x)
+        self.save()
+        utils.generate_animation(self.result_dir + '/' + self.model_dir + '/' + self.model_name, self.epoch)
+        utils.generate_train_animation(self.result_dir + '/' + self.model_dir + '/' + self.model_name, self.epoch)
+        utils.loss_VAE_plot(self.train_hist, os.path.join(self.save_dir, self.model_dir), self.model_name)
 
-        x = Dense(w * w * 512)(z)
-        x = BatchNormalization()(x)
-        x = Activation('relu')(x)
+    def visualize_results(self, epoch, fix=True):
+        self.De.eval()
 
-        x = Reshape((w, w, 512))(x)
+        tot_num_samples = min(self.sample_num, self.batch_size)
+        image_frame_dim = int(np.floor(np.sqrt(tot_num_samples)))
 
-        x = BasicDeconvLayer(filters=1024, strides=(2, 2), kernel_size=(3,3))(x)
-        x = BasicDeconvLayer(filters=512, strides=(2, 2), kernel_size=(3,3))(x)
-        x = BasicDeconvLayer(filters=256, strides=(2, 2), kernel_size=(5,5))(x)
-        x = BasicDeconvLayer(filters=128, strides=(2, 2), kernel_size=(5,5))(x)
+        if fix:
+            """ fixed noise """
+            samples = self.De(self.sample_z_, self.sample_y_)
+        else:
+            """ random noise """
+            temp = torch.LongTensor(self.batch_size, 1).random_() % 10
+            sample_y_ = torch.FloatTensor(self.batch_size, self.y_dim)
+            sample_y_.zero_()
+            sample_y_.scatter_(1, temp, 1)
 
-        d = self.input_shape[2]
-        x = BasicDeconvLayer(filters=d, strides=(1, 1), bnorm=False, activation='tanh')(x)
+            with torch.no_grad():
+                sample_z_ = torch.from_numpy(self.z_n).type(torch.FloatTensor).to(self.device)
+                sample_y_.to(self.device)
 
-        return Model([z_inputs, c_inputs], x)
+            samples = self.De(sample_z_, sample_y_)
 
-    def build_discriminator(self):
-        """
-        use as the same network as DCGAN.
-        """
-        inputs = Input(shape=self.input_shape)
-      
-        x = BasicConvLayer(filters=128, strides=(2, 2))(inputs)
-        x = BasicConvLayer(filters=256, strides=(2, 2))(x)
-        x = BasicConvLayer(filters=512, strides=(2, 2))(x)
-        x = BasicConvLayer(filters=512, strides=(2, 2))(x)
+        if self.gpu_mode:
+            samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
+        else:
+            samples = samples.numpy().transpose(0, 2, 3, 1)
 
-        #f = Flatten()(x)
-        #x = Dense(1024)(f)
-        f = GlobalAveragePooling2D()(x)
-        x = LeakyReLU(0.3)(x)
+        utils.save_images(samples[:image_frame_dim * image_frame_dim, :, :, :], [image_frame_dim, image_frame_dim],
+                          utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' +
+                          self.model_name + '_epoch%03d' % epoch + '_test_all_classes.png')
 
-        x = Dense(1)(x)
-        x = Activation('sigmoid')(x)
+    @property
+    def model_dir(self):
+        return "{}_{}_{}_{}".format(
+            self.model_name, self.dataset,
+            self.batch_size, self.z_dim)
 
-        return Model(inputs, [x, f])
+    def save(self):
+        save_dir = os.path.join(self.save_dir, self.model_dir)
 
-    def build_classifier(self):
-        """
-        Alex net
-        """
-        inputs = Input(shape=self.input_shape)
-      
-        x = BasicConvLayer(filters=128, strides=(2, 2))(inputs)
-        x = BasicConvLayer(filters=256, strides=(2, 2))(x)
-        x = BasicConvLayer(filters=512, strides=(2, 2))(x)
-        x = BasicConvLayer(filters=512, strides=(2, 2))(x)
-        
-        f = Flatten()(x)
-        x = Dense(1024)(f)
-        x = Activation('relu')(x)
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
-        x = Dense(self.num_attrs)(x)
-        #x = Activation('softmax')(x)
-        x = Activation('sigmoid')(x)
+        torch.save(self.CVAE.state_dict(), os.path.join(save_dir, self.model_name + '_VAE.pkl'))
 
-        return Model(inputs, [x, f])
+        with open(os.path.join(save_dir, self.model_name + '_history.pkl'), 'wb') as f:
+            pickle.dump(self.train_hist, f)
+
+    def load(self):
+        save_dir = os.path.join(self.save_dir, self.dataset, self.model_name)
+
+        self.CVAE.load_state_dict(torch.load(os.path.join(save_dir, self.model_name + '_VAE.pkl')))
+
