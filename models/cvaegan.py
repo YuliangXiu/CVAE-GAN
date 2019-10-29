@@ -77,6 +77,7 @@ class CVAE(object):
         self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, phase='train', max_size=args.data_size, dim=args.pix_dim, cls_num=args.y_dim)
         self.test_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, phase='test', max_size=args.data_size, dim=args.pix_dim, cls_num=args.y_dim)
 
+        self.sample_per_batch = len(self.train_data)/self.batch_size
         print("Trainset: %d | Testset: %d \n"%(len(self.train_data), len(self.test_data)))
 
         self.trainset_loader = DataLoaderX(
@@ -100,8 +101,12 @@ class CVAE(object):
         self.En = encoder(args, self.dataset)
         self.De = decoder(args, self.dataset)
         self.CVAE = CVAE_T(args, self.En, self.De)
+        
+        if args.resume:
+            self.load()            
+            
         self.CVAE_optimizer = optim.Adam(self.CVAE.parameters(),lr=args.lrG, betas=(0.5, 0.999))
-
+        
         # to device
         self.CVAE.to(self.device)
         self.L1_loss = nn.L1Loss().to(self.device)
@@ -192,25 +197,26 @@ class CVAE(object):
                     print("Epoch: [%2d] [%4d/%4d] time: %4.4f VAE_loss: %.8f KL_loss: %.8f LL_loss: %.8f" %
                           ((epoch + 1), (iter + 1), len(self.train_data) // self.batch_size, time.time() - start_time,
                            VAE_loss.item(), KL_loss.item(), LL_loss.item()))
-                    utils.update_loc_plot(viz, iter_plot_loc, "iter", epoch, iter, self.batch_size, [VAE_loss.item(), KL_loss.item(), LL_loss.item()])
+                    utils.update_loc_plot(viz, iter_plot_loc, "iter", epoch, iter, self.sample_per_batch, [VAE_loss.item(), KL_loss.item(), LL_loss.item()])
                     
-                if np.mod((iter + 1), 200) == 0:
-                    # print("saving results images...")
-                    self.En.eval()
-                    self.De.eval()
-                    with torch.no_grad():
-                        samples = self.De(self.sample_z_, self.sample_y_, 'test')
-                    samples = samples.numpy().transpose(0, 2, 3, 1)
-                    tot_num_samples = 100
-                    manifold_h = int(np.floor(np.sqrt(tot_num_samples)))
-                    manifold_w = int(np.floor(np.sqrt(tot_num_samples)))
-                    utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w],
-                                utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.model_name +
-                                '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
+                # if np.mod((iter + 1), 200) == 0:
+            # print("saving results images...")
+            self.En.eval()
+            self.De.eval()
+            with torch.no_grad():
+                samples = self.De(self.sample_z_, self.sample_y_, 'test')
+            samples = samples.numpy().transpose(0, 2, 3, 1)
+            tot_num_samples = 100
+            manifold_h = int(np.floor(np.sqrt(tot_num_samples)))
+            manifold_w = int(np.floor(np.sqrt(tot_num_samples)))
+            utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w],
+                        utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.model_name +
+                        '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
+            
             if epoch % 10 == 0:
                 self.save()
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
-            utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.batch_size, [VAE_loss_total, KL_loss_total, LL_loss_total])
+            utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.sample_per_batch, [VAE_loss_total, KL_loss_total, LL_loss_total])
 
             # self.visualize_results((epoch+1))
 
@@ -273,7 +279,7 @@ class CVAE(object):
             pickle.dump(self.train_hist, f)
 
     def load(self):
-        save_dir = os.path.join(self.save_dir, self.dataset, self.model_name)
+        save_dir = os.path.join(self.save_dir, self.model_dir)
 
         self.CVAE.load_state_dict(torch.load(os.path.join(save_dir, self.model_name + '_VAE.pkl')))
 

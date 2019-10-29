@@ -7,4 +7,5 @@ python train_CVAE-GAN.py --dataset "GT" \
                         --pix_dim 256 \
                         --gpus 0 \
                         --worker 14 \
-                        --lrG 1e-4
+                        --lrG 1e-4 \
+                        --resume

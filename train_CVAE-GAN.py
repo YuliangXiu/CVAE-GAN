@@ -32,7 +32,7 @@ def main():
     parser.add_argument('--gan_type', type=str, default='VAE')
     parser.add_argument('--worker', type=int, default=10)
     parser.add_argument('--lrG', type=float, default=1e-3)
-    parser.add_argument('--resume', type=str, default=None)
+    parser.add_argument('--resume', action='store_true')
     parser.add_argument('--testmode', action='store_true')
 
     args = parser.parse_args()
