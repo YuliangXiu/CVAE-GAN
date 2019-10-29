@@ -12,51 +12,14 @@ from cv2 import imread, imwrite, connectedComponents
 from torchsummary import summary
 from models.networks import *
 from models import utils
+from visdom import Visdom
+from prefetch_generator import BackgroundGenerator
 
-class decoder(nn.Module):
-    # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
-    # Architecture : FC1024_BR-FC7x7x128_BR-(64)4dc2s_BR-(1)4dc2s_S
-    def __init__(self, args, dataset='1101'):
-        super(decoder, self).__init__()
-        self.z_dim = args.z_dim
-        self.norm_layer = get_norm_layer(layer_type='batch')
-        self.nl_layer = get_non_linearity(layer_type='lrelu')
-        self.pix_dim = args.pix_dim
-        self.in_dim = args.z_dim + args.y_dim
+class DataLoaderX(DataLoader):
+    
+    def __iter__(self):
+        return BackgroundGenerator(super().__iter__())
 
-        self.decoder = ConvUpSampleDecoder(self.pix_dim, self.in_dim, 64, 4, self.norm_layer, self.nl_layer)
-        init_net(self.decoder, 'kaiming')
-      
-    def forward(self, input, label, phase='train'):
-        x = torch.cat([input, label], dim=1)
-        if phase == 'test':
-            self.decoder = self.decoder.to('cpu')
-        else:
-            self.decoder = self.decoder.to('cuda')
-        x = self.decoder(x)
-
-        return x
-
-class encoder(nn.Module):
-    # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
-    # Architecture : (64)4c2s-(128)4c2s_BL-FC1024_BL-FC1_S
-    def __init__(self, args, dataset = '1101'):
-        super(encoder, self).__init__()
-
-        self.z_dim = args.z_dim * 2
-        self.norm_layer = get_norm_layer(layer_type='batch')
-        self.nl_layer = get_non_linearity(layer_type='lrelu')
-        self.pix_dim = args.pix_dim
-        self.in_dim = 3 + args.y_dim
-
-        self.encoder = ResNetEncoder(self.pix_dim, self.in_dim, self.z_dim, 64, 4, self.norm_layer, self.nl_layer)
-        init_net(self.encoder, 'kaiming')
-
-    def forward(self, input, label):
-        x = torch.cat([input, label], dim=1)
-        x = self.encoder(x)
-
-        return x
         
 class CVAE_T(torch.nn.Module):
     def __init__(self, args, encoder, decoder):
@@ -116,20 +79,22 @@ class CVAE(object):
 
         print("Trainset: %d | Testset: %d \n"%(len(self.train_data), len(self.test_data)))
 
-        self.trainset_loader = DataLoader(
+        self.trainset_loader = DataLoaderX(
             dataset=self.train_data,
             batch_size=args.batch_size,
             drop_last=True,
             shuffle=True,
-            num_workers=args.worker
+            num_workers=args.worker,
+            pin_memory=True
         )
-        self.testset_loader = DataLoader(
-            dataset=self.test_data,
-            batch_size=args.batch_size,
-            drop_last=True,
-            shuffle=True,
-            num_workers=args.worker
-        )
+        # self.testset_loader = DataLoaderX(
+        #     dataset=self.test_data,
+        #     batch_size=args.batch_size,
+        #     drop_last=True,
+        #     shuffle=True,
+        #     num_workers=args.worker,
+        #     pin_memory=True
+        # )
 
         # networks init
         self.En = encoder(args, self.dataset)
@@ -181,15 +146,29 @@ class CVAE(object):
 
         self.CVAE.train()
         print('training start!!')
+        
+        # visdom
+        viz = Visdom(port=2000, env='VAE')
+        assert viz.check_connection()
+        iter_plot_loc = utils.create_loc_plot(viz, 'Iteration', 'Loss', 'VAE:(iter)', ['VAE', 'KL', 'LL'])
+        epoch_plot_loc = utils.create_loc_plot(viz, 'Epoch', 'Loss', 'VAE:(epoch)', ['VAE', 'KL', 'LL'])
+    
         start_time = time.time()
         for epoch in range(self.epoch):
-            self.En.train()
             epoch_start_time = time.time()
+            VAE_loss_total = []
+            KL_loss_total = []
+            LL_loss_total = []
             for iter, (imgs, labels) in enumerate(self.trainset_loader):
-
+                
+                self.En.train()
+                self.De.train()
+                
                 x_ = imgs.to(self.device)
                 y_vec_ = labels.to(self.device)
                 y_fill_ = self.fill[torch.max(y_vec_, 1)[1].squeeze()].to(self.device)
+                
+                # print(x_.shape, y_vec_.shape, y_fill_.shape)
              
                 # update VAE network
                 dec = self.CVAE(x_, y_fill_, y_vec_)
@@ -197,6 +176,10 @@ class CVAE(object):
                 KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)
                 LL_loss = self.L1_loss(dec, x_)
                 VAE_loss = LL_loss + KL_loss
+                
+                VAE_loss_total.append(VAE_loss.item())
+                KL_loss_total.append(KL_loss.item())
+                LL_loss_total.append(LL_loss.item())
 
                 self.train_hist['VAE_loss'].append(VAE_loss.item())
                 self.train_hist['KL_loss'].append(KL_loss.item())
@@ -206,11 +189,15 @@ class CVAE(object):
                 self.CVAE_optimizer.step()
 
                 if ((iter + 1) % 100) == 0:
-                    print("Epoch: [%2d] [%4d/%4d] time: %4.4f VAE_loss: %.8f" %
+                    print("Epoch: [%2d] [%4d/%4d] time: %4.4f VAE_loss: %.8f KL_loss: %.8f LL_loss: %.8f" %
                           ((epoch + 1), (iter + 1), len(self.train_data) // self.batch_size, time.time() - start_time,
-                           VAE_loss.item()))
+                           VAE_loss.item(), KL_loss.item(), LL_loss.item()))
+                    utils.update_loc_plot(viz, iter_plot_loc, "iter", epoch, iter, self.batch_size, [VAE_loss.item(), KL_loss.item(), LL_loss.item()])
+                    
                 if np.mod((iter + 1), 200) == 0:
                     # print("saving results images...")
+                    self.En.eval()
+                    self.De.eval()
                     with torch.no_grad():
                         samples = self.De(self.sample_z_, self.sample_y_, 'test')
                     samples = samples.numpy().transpose(0, 2, 3, 1)
@@ -220,9 +207,12 @@ class CVAE(object):
                     utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w],
                                 utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.model_name +
                                 '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
-
+            if epoch % 10 == 0:
+                self.save()
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
-            self.visualize_results((epoch+1))
+            utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.batch_size, [VAE_loss_total, KL_loss_total, LL_loss_total])
+
+            # self.visualize_results((epoch+1))
 
         self.train_hist['total_time'].append(time.time() - start_time)
         print("Avg one epoch time: %.2f, total %d epochs time: %.2f" % (np.mean(self.train_hist['per_epoch_time']),
@@ -230,8 +220,8 @@ class CVAE(object):
         print("Training finish!... save training results")
 
         self.save()
-        utils.generate_animation(self.result_dir + '/'+ self.model_name, self.epoch)
-        utils.generate_train_animation(self.result_dir + '/'+ self.model_name, self.epoch)
+        utils.generate_animation(self.result_dir + '/'+ self.model_dir + '/'+ self.model_name, self.epoch)
+        utils.generate_train_animation(self.result_dir + '/'+ self.model_dir + '/'+ self.model_name, self.epoch)
         utils.loss_VAE_plot(self.train_hist, os.path.join(self.save_dir, self.model_dir), self.model_name)
 
     def visualize_results(self, epoch, fix=True):
@@ -267,7 +257,7 @@ class CVAE(object):
 
     @property
     def model_dir(self):
-        return "{}_{}_{}_{}".format(
+        return "{}_data_{}_batch_{}_embed_{}".format(
             self.model_name, self.dataset,
             self.batch_size, self.z_dim)
 

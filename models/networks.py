@@ -12,6 +12,51 @@ from cv2 import imread, imwrite, connectedComponents
 from torchsummary import summary
 from models.utils import *
 
+class decoder(nn.Module):
+    # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
+    # Architecture : FC1024_BR-FC7x7x128_BR-(64)4dc2s_BR-(1)4dc2s_S
+    def __init__(self, args, dataset='1101'):
+        super(decoder, self).__init__()
+        self.z_dim = args.z_dim
+        self.norm_layer = get_norm_layer(layer_type='batch')
+        self.nl_layer = get_non_linearity(layer_type='lrelu')
+        self.pix_dim = args.pix_dim
+        self.in_dim = args.z_dim + args.y_dim
+
+        self.decoder = ConvUpSampleDecoder(self.pix_dim, self.in_dim, 64, 4, self.norm_layer, self.nl_layer)
+        init_net(self.decoder, 'kaiming')
+      
+    def forward(self, input, label, phase='train'):
+        x = torch.cat([input, label], dim=1)
+        if phase == 'test':
+            self.decoder = self.decoder.to('cpu')
+        else:
+            self.decoder = self.decoder.to('cuda')
+        x = self.decoder(x)
+
+        return x
+
+class encoder(nn.Module):
+    # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
+    # Architecture : (64)4c2s-(128)4c2s_BL-FC1024_BL-FC1_S
+    def __init__(self, args, dataset = '1101'):
+        super(encoder, self).__init__()
+
+        self.z_dim = args.z_dim * 2
+        self.norm_layer = get_norm_layer(layer_type='batch')
+        self.nl_layer = get_non_linearity(layer_type='lrelu')
+        self.pix_dim = args.pix_dim
+        self.in_dim = 3 + args.y_dim
+
+        self.encoder = ResNetEncoder(self.pix_dim, self.in_dim, self.z_dim, 64, 4, self.norm_layer, self.nl_layer)
+        init_net(self.encoder, 'kaiming')
+
+    def forward(self, input, label):
+        x = torch.cat([input, label], dim=1)
+        x = self.encoder(x)
+
+        return x
+
 
 #####  Decoder #####
 class ConvResDecoder(nn.Module):

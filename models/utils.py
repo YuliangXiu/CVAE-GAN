@@ -204,3 +204,31 @@ def gaussian(batch_size, n_dim, mean=0, var=1, n_labels=10, use_label_info=False
     else:
         z = np.random.normal(mean, var, (batch_size, n_dim)).astype(np.float32)
         return z
+
+def create_loc_plot(viz, _xlabel, _ylabel, _title, legend):
+    return viz.line(
+        X=np.zeros((1,len(legend))),
+        Y=np.zeros((1,len(legend))),
+        opts=dict(
+            xlabel=_xlabel,
+            ylabel=_ylabel,
+            title=_title,
+            legend=legend
+        )
+    )
+
+def update_loc_plot(viz, window, epoch_or_iter, epoch, i, batch_per_epoch, losses):
+
+    if epoch_or_iter == 'epoch':
+        x_arr = np.ones((1, ))*(epoch)
+        y_arr = torch.cat([torch.mean(torch.Tensor(loss)).unsqueeze(0)for loss in losses]).unsqueeze(0).detach().cpu().numpy()
+    elif epoch_or_iter == 'iter':
+        x_arr = np.ones((1,len(losses)))*(epoch*batch_per_epoch+i)
+        y_arr = torch.Tensor([loss for loss in losses]).unsqueeze(0).detach().cpu().numpy()
+    
+    viz.line(
+        X=x_arr,
+        Y=y_arr,
+        win=window,
+        update='append'
+    )    
