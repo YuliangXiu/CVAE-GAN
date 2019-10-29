@@ -8,6 +8,7 @@ data/*
 output/*
 result*
 datasets/files/*
+__pycache__
 *.jpg
 *.png
 *.pth
