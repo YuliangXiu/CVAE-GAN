@@ -12,6 +12,43 @@ from cv2 import imread, imwrite, connectedComponents
 from torchsummary import summary
 from models.utils import *
 
+
+class CVAE_T(torch.nn.Module):
+    def __init__(self, args, encoder, decoder):
+        super(CVAE_T, self).__init__()
+        self.z_dim = args.z_dim
+        self.encoder = encoder
+        self.decoder = decoder
+        self.device = args.device
+
+    def _sample_latent(self, h_enc):
+        """
+        Return the latent normal sample z ~ N(mu, sigma^2)
+        """
+        # print(h_enc.shape)
+        mu = h_enc[:, :self.z_dim]
+        log_sigma = h_enc[:, self.z_dim:]
+        sigma = torch.exp(log_sigma)
+        std_z = torch.from_numpy(np.random.normal(0, 1, size=sigma.size())).type(torch.FloatTensor).to(self.device)
+
+        self.z_mean = mu
+        self.z_sigma = sigma
+
+        # print(self.device, type(mu), type(sigma), type(std_z))
+        # print(mu.shape, sigma.shape, std_z.shape)
+
+        return mu + sigma * std_z
+
+    def forward(self, state, label1, label2):
+        h_enc = self.encoder(state, label1)
+        z = self._sample_latent(h_enc)
+        return self.decoder(z, label2)
+
+def latent_loss(z_mean, z_stddev):
+    mean_sq = z_mean * z_mean
+    stddev_sq = z_stddev * z_stddev
+    return 0.5 * torch.mean(mean_sq + stddev_sq - torch.log(stddev_sq) - 1)
+
 class decoder(nn.Module):
     # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
     # Architecture : FC1024_BR-FC7x7x128_BR-(64)4dc2s_BR-(1)4dc2s_S
@@ -272,10 +309,10 @@ def init_weights(net, init_type='normal', gain=0.02):
     print('initialize network with %s' % init_type)
     net.apply(init_func)
     
-def init_net(net, init_type='normal', device=torch.device('cuda')):
+def init_net(net, init_type='normal'):
     net = nn.DataParallel(net)
     init_weights(net, init_type)
-    return net.to(device)
+    return net.to(torch.device('cuda'))
 
 def get_scheduler(optimizer, opt):
     if opt.lr_policy == 'lambda':

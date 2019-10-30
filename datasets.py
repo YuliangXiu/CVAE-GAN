@@ -19,44 +19,28 @@ im_trans = transforms.Compose([
 
 
 class BodyMapDataset(Dataset):
-    def __init__(self, data_root, dataset, phase='train', train_test_split=0.98, dim=512, max_size=-1, device=None, transform=im_trans, cls_num=10):
+    def __init__(self, data_root, dataset, dim=512, max_size=-1, device=None, transform=im_trans, cls_num=12):
         
         super(BodyMapDataset, self).__init__()
         # Set image transforms and device
         self.device = torch.device('cuda') if device is None else device
         self.transform = transform
-        self.phase = phase
         self.pix_dim = (dim, dim, 3)
         self.labeldim = 1
         self.cls_num = cls_num
-
         self.im_root = os.path.join(data_root, dataset)
-        if not os.path.isdir(self.im_root):
-            raise(FileNotFoundError('{} dataset not found, '.format(dataset_name) + 
-                'please run "data_washing.py" first'))
         
         # Prepare train/test split
-        self.names = np.loadtxt(os.path.join(data_root, 'input_%s.txt'%(dataset)), dtype=str)
+        self.names = np.loadtxt(os.path.join(self.im_root, 'input_%s.txt'%(dataset)), dtype=str)[:max_size]
         self.len =  len(self.names)
-        self.split = train_test_split
-        split_point = int(train_test_split * self.len)
-
-        self.im_names = [os.path.join(self.im_root, im_name) for im_name in self.names]
-
-        if self.phase == 'train':
-            self.names = self.names[:split_point]
-            self.im_names = self.im_names[:split_point]
-        elif self.phase == 'test':
-            self.names = self.names[split_point:]
-            self.im_names = self.im_names[split_point:]
+        self.im_names = [os.path.join(self.im_root, 'GT_output', im_name) for im_name in self.names]
     
     def __getitem__(self, id):
 
-        out_dict = {}
         img = self.transform(resize(imread(self.im_names[id]), self.pix_dim[:-1]))
-        label = torch.Tensor([(int(self.names[id].split("_")[1])-1)//100]).type(torch.LongTensor)
+        label = torch.Tensor([int(self.names[id].split("_")[1])-2]).type(torch.LongTensor)
         y = torch.zeros(1, self.cls_num)
-        y[range(y.shape[0]), label]=1
+        y[0, label]=1
 
         return img, y.squeeze(0)
         
@@ -65,7 +49,7 @@ class BodyMapDataset(Dataset):
 
 
 if __name__ == '__main__':
-    train_dataset = BodyMapDataset(data_root="./data/GT", phase='train')
+    train_dataset = BodyMapDataset(data_root="./data", dataset="PoseUnit")
     trainset_loader = DataLoader(
         dataset=train_dataset,
         batch_size=10,
