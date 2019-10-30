@@ -33,7 +33,10 @@ class CVAE(object):
         self.y_dim = args.y_dim
         self.z_dim = args.z_dim
         self.pix_dim = args.pix_dim
-
+        
+        # Load mask
+        self.mask = utils.generate_mask("stretch" in self.dataset, self.pix_dim).to(self.device)
+        
         # Load datasets
         self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, max_size=args.data_size, dim=args.pix_dim, cls_num=args.y_dim)
 
@@ -123,7 +126,8 @@ class CVAE(object):
                 dec = self.CVAE(x_, y_fill_, y_vec_)
                 self.CVAE_optimizer.zero_grad()
                 KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)
-                LL_loss = self.L1_loss(dec, x_)
+                # print(self.mask.shape, dec.shape, x_.shape)
+                LL_loss = self.L1_loss(dec*self.mask, x_*self.mask) 
                 VAE_loss = LL_loss + KL_loss
                 
                 VAE_loss_total.append(VAE_loss.item())
@@ -169,7 +173,7 @@ class CVAE(object):
         print("Training finish!... save training results")
 
         self.save()
-        utils.generate_train_animation(self.result_dir + '/'+ self.model_dir + '/'+ self.dataset, self.epoch, len(self.train_data))
+        utils.generate_train_animation(self.result_dir + '/'+ self.model_dir + '/'+ self.dataset, self.epoch, len(self.train_data)/self.batch_size)
         utils.loss_VAE_plot(self.train_hist, os.path.join(self.save_dir, self.model_dir), self.dataset)
 
     @property

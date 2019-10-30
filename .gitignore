@@ -3,6 +3,8 @@ nput/
 *.gz
 *.pkl
 *~
+*.mat
+*.png
 *.swp
 data/*
 output/*

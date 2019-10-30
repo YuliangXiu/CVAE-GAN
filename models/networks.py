@@ -34,9 +34,6 @@ class CVAE_T(torch.nn.Module):
         self.z_mean = mu
         self.z_sigma = sigma
 
-        # print(self.device, type(mu), type(sigma), type(std_z))
-        # print(mu.shape, sigma.shape, std_z.shape)
-
         return mu + sigma * std_z
 
     def forward(self, state, label1, label2):

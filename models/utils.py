@@ -5,6 +5,7 @@ import imageio
 import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
 import cv2
+import scipy.io as sio
 
 def print_network(net):
     num_params = 0
@@ -169,3 +170,20 @@ def update_loc_plot(viz, window, epoch_or_iter, epoch, i, batch_per_epoch, losse
         win=window,
         update='append'
     )    
+    
+def generate_mask(stretch, dim):
+    
+    matfile = "template_female_202" + "_stretch"*stretch + ".mat"
+    npyfile = "mask" + "_stretch"*stretch + ".npy"
+    pngfile = "dist" + "_stretch"*stretch + ".png"
+    feature_points = sio.loadmat(matfile, squeeze_me=True)['para']['feature_uv'].item().astype(np.int32)
+  
+    mask = np.ones((dim,dim))
+    for keypoint in feature_points:
+        mask[int((keypoint[1]-1)/(512/dim)), int((keypoint[0]-1)/(512/dim))] = 0
+    dist = cv2.distanceTransform(mask.astype(np.uint8), cv2.DIST_L2, 3)
+    cv2.normalize(dist, dist, 0, 1, cv2.NORM_MINMAX)
+    np.save(npyfile, (1-dist))
+    cv2.imwrite(pngfile, 255*(1-dist))
+    
+    return torch.Tensor(1-dist)
