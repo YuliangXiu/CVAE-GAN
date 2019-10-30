@@ -5,6 +5,7 @@ nput/
 *~
 *.mat
 *.png
+*.npy
 *.swp
 data/*
 output/*
