@@ -210,20 +210,24 @@ def generate_mask_guass(stretch, dim, cls_num):
     pngfile = "template_info/guass_vis/guass" + "_stretch"*stretch + "_%s.png"
     feature_points = sio.loadmat(matfile, squeeze_me=True)['para']['feature_uv'].item().astype(np.int32)
     feature_points_label = sio.loadmat(labelfile, squeeze_me=True)['body_pose_index_feature_uv']
+
+    if os.path.exists(npyfile):
+        mask = np.load(npyfile)
+    else:
   
-    mask = np.zeros((cls_num, dim, dim))
-    x = np.linspace(0, dim-1, dim)
-    y = np.linspace(0, dim-1, dim)
-    x, y = np.meshgrid(x, y)
+        mask = np.zeros((cls_num, dim, dim))
+        x = np.linspace(0, dim-1, dim)
+        y = np.linspace(0, dim-1, dim)
+        x, y = np.meshgrid(x, y)
 
-    std = dim/10.0
+        std = dim/10.0
 
-    for cls_id in range(cls_num):
-        for keypoint in feature_points[(feature_points_label[cls_id+1]-1).tolist(),:]:
-            mask[cls_id] += gaus2d(x, y, int((keypoint[0]-1)/(512/dim)), int((keypoint[1]-1)/(512/dim)), std, std)
-        mask[cls_id] = (mask[cls_id]-np.min(mask[cls_id]))/(np.max(mask[cls_id])-np.min(mask[cls_id]))
-        cv2.imwrite(pngfile%(cls_id+2), 255*(mask[cls_id]))
-    np.save(npyfile, mask)
+        for cls_id in range(cls_num):
+            for keypoint in feature_points[(feature_points_label[cls_id+1]-1).tolist(),:]:
+                mask[cls_id] += gaus2d(x, y, int((keypoint[0]-1)/(512/dim)), int((keypoint[1]-1)/(512/dim)), std, std)
+            mask[cls_id] = (mask[cls_id]-np.min(mask[cls_id]))/(np.max(mask[cls_id])-np.min(mask[cls_id]))
+            cv2.imwrite(pngfile%(cls_id+2), 255*(mask[cls_id]))
+        np.save(npyfile, mask)
     
     return torch.Tensor(mask)
 
