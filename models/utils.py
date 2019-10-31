@@ -171,19 +171,63 @@ def update_loc_plot(viz, window, epoch_or_iter, epoch, i, batch_per_epoch, losse
         update='append'
     )    
     
-def generate_mask(stretch, dim):
+def gaus2d(x=0, y=0, mx=0, my=0, sx=10, sy=10):
+        return 1. / (2. * np.pi * sx * sy) * np.exp(-((x - mx)**2. / (2. * sx**2.) + (y - my)**2. / (2. * sy**2.)))
+
+
+def generate_mask(stretch, dim, cls_num):
     
-    matfile = "template_female_202" + "_stretch"*stretch + ".mat"
-    npyfile = "mask" + "_stretch"*stretch + ".npy"
-    pngfile = "dist" + "_stretch"*stretch + ".png"
+    matfile = "template_info/template_female_202" + "_stretch"*stretch + ".mat"
+    labelfile = "template_info/template_female_202" + "_stretch"*stretch + "_feature_pose_label.mat"
+    npyfile = "template_info/mask" + "_stretch"*stretch + ".npy"
+    pngfile = "template_info/dist_vis/dist" + "_stretch"*stretch + "_%s.png"
     feature_points = sio.loadmat(matfile, squeeze_me=True)['para']['feature_uv'].item().astype(np.int32)
+    feature_points_label = sio.loadmat(labelfile, squeeze_me=True)['body_pose_index_feature_uv']
+
+    if os.path.exists(npyfile):
+        mask = np.load(npyfile)
+    else:
   
-    mask = np.ones((dim,dim))
-    for keypoint in feature_points:
-        mask[int((keypoint[1]-1)/(512/dim)), int((keypoint[0]-1)/(512/dim))] = 0
-    dist = cv2.distanceTransform(mask.astype(np.uint8), cv2.DIST_L2, 3)
-    cv2.normalize(dist, dist, 0, 1, cv2.NORM_MINMAX)
-    np.save(npyfile, (1-dist))
-    cv2.imwrite(pngfile, 255*(1-dist))
+        mask = np.ones((cls_num, dim, dim))
+        for cls_id in range(cls_num):
+            for keypoint in feature_points[(feature_points_label[cls_id+1]-1).tolist(),:]:
+                mask[cls_id, int((keypoint[1]-1)/(512/dim)), int((keypoint[0]-1)/(512/dim))] = 0
+
+            dist = cv2.distanceTransform(mask[cls_id].astype(np.uint8), cv2.DIST_L2, 3)
+            cv2.normalize(dist, dist, 0, 1, cv2.NORM_MINMAX)
+            cv2.imwrite(pngfile%(cls_id+2), 255*(1-dist))
+            mask[cls_id, :, :] = 1-dist
+
+    np.save(npyfile, mask)
     
-    return torch.Tensor(1-dist)
+    return torch.Tensor(mask)
+
+def generate_mask_guass(stretch, dim, cls_num):
+    
+    matfile = "template_info/template_female_202" + "_stretch"*stretch + ".mat"
+    labelfile = "template_info/template_female_202" + "_stretch"*stretch + "_feature_pose_label.mat"
+    npyfile = "template_info/mask_guass" + "_stretch"*stretch + ".npy"
+    pngfile = "template_info/guass_vis/guass" + "_stretch"*stretch + "_%s.png"
+    feature_points = sio.loadmat(matfile, squeeze_me=True)['para']['feature_uv'].item().astype(np.int32)
+    feature_points_label = sio.loadmat(labelfile, squeeze_me=True)['body_pose_index_feature_uv']
+  
+    mask = np.zeros((cls_num, dim, dim))
+    x = np.linspace(0, dim-1, dim)
+    y = np.linspace(0, dim-1, dim)
+    x, y = np.meshgrid(x, y)
+
+    std = dim/10.0
+
+    for cls_id in range(cls_num):
+        for keypoint in feature_points[(feature_points_label[cls_id+1]-1).tolist(),:]:
+            mask[cls_id] += gaus2d(x, y, int((keypoint[0]-1)/(512/dim)), int((keypoint[1]-1)/(512/dim)), std, std)
+        mask[cls_id] = (mask[cls_id]-np.min(mask[cls_id]))/(np.max(mask[cls_id])-np.min(mask[cls_id]))
+        cv2.imwrite(pngfile%(cls_id+2), 255*(mask[cls_id]))
+    np.save(npyfile, mask)
+    
+    return torch.Tensor(mask)
+
+if __name__ == '__main__':
+    generate_mask(True, 256, 16)
+    generate_mask_guass(True, 256, 16)
+    

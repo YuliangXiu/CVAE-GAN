@@ -1,7 +1,7 @@
 python train_CVAE.py --dataset "PoseUnit" \
                         --data_dir "./data" \
                         --epoch 50 \
-                        --batch_size 14 \
+                        --batch_size 10 \
                         --data_size -1 \
                         --z_dim 256 \
                         --y_dim 16 \

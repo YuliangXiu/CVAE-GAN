@@ -26,7 +26,7 @@ def main():
     parser.add_argument('--y_dim', type=int, default=1000)
     parser.add_argument('--pix_dim', type=int, default=512)
     parser.add_argument('--cls_num', type=int, default=12)
-    parser.add_argument('--gpus', type=str, default='0,1')
+    parser.add_argument('--gpus', type=str, default='0')
     parser.add_argument('--gan_type', type=str, default='VAE')
     parser.add_argument('--worker', type=int, default=10)
     parser.add_argument('--lrG', type=float, default=1e-3)
@@ -40,8 +40,8 @@ def main():
     import torch
     torch.backends.cudnn.benchmark = True
     
-    import torch.multiprocessing as mp
-    mp.set_start_method('spawn')
+    # import torch.multiprocessing as mp
+    # mp.set_start_method('spawn')
 
     args.device = torch.device('cuda' if torch.cuda.is_available() else torch.device('cpu'))
 

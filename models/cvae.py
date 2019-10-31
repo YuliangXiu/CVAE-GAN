@@ -35,7 +35,8 @@ class CVAE(object):
         self.pix_dim = args.pix_dim
         
         # Load mask
-        self.mask = utils.generate_mask("stretch" in self.dataset, self.pix_dim).to(self.device)
+        # self.mask = utils.generate_mask("stretch" in self.dataset, self.pix_dim, self.y_dim).to(self.device)
+        self.mask = utils.generate_mask_guass("stretch" in self.dataset, self.pix_dim, self.y_dim).to(self.device)
         
         # Load datasets
         self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, max_size=args.data_size, dim=args.pix_dim, cls_num=args.y_dim)
@@ -60,12 +61,13 @@ class CVAE(object):
         if args.resume:
             self.load()            
             
-        self.CVAE_optimizer = optim.Adam(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999))
-        self.CVAE_scheduler = torch.optim.lr_scheduler.StepLR(self.CVAE_optimizer, step_size=10, gamma=0.2)
+        self.CVAE_optimizer = optim.Adam(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08)
+        self.CVAE_scheduler = torch.optim.lr_scheduler.StepLR(self.CVAE_optimizer, step_size=5, gamma=0.3)
         
         # to device
         self.CVAE.to(self.device)
         self.L1_loss = nn.L1Loss().to(self.device)
+        self.MSE_loss = nn.MSELoss().to(self.device)
 
         # fixed noise & condition
         self.sample_z_ = torch.zeros((self.sample_num * self.y_dim, self.z_dim))
@@ -126,8 +128,9 @@ class CVAE(object):
                 dec = self.CVAE(x_, y_fill_, y_vec_)
                 self.CVAE_optimizer.zero_grad()
                 KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)
-                # print(self.mask.shape, dec.shape, x_.shape)
-                LL_loss = self.L1_loss(dec*self.mask, x_*self.mask) 
+                label_mask = torch.unsqueeze(self.mask[(labels==1.0).nonzero()[:,1]],1)
+                # LL_loss = self.L1_loss(dec*label_mask, x_*label_mask) 
+                LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask) 
                 VAE_loss = LL_loss + KL_loss
                 
                 VAE_loss_total.append(VAE_loss.item())
@@ -139,7 +142,10 @@ class CVAE(object):
                 self.train_hist['LL_loss'].append(LL_loss.item())
 
                 VAE_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.CVAE.parameters(), 1)
+
+                # print(torch.max(self.CVAE.parameters()), torch.min(self.CVAE.parameters()))
+                # torch.nn.utils.clip_grad_norm_(self.CVAE.parameters(), 5)
+
                 self.CVAE_optimizer.step()
 
                 if ((iter + 1) % 20) == 0:
