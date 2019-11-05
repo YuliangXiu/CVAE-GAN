@@ -42,6 +42,7 @@ class BodyMapDataset(Dataset):
         label = torch.Tensor([int(self.names[id].split("_")[1])-2]).type(torch.LongTensor)
         y = torch.zeros(1, self.cls_num)
         y[0, label]=1
+        print(y)
 
         return img, y.squeeze(0)
         
