@@ -15,11 +15,11 @@ def print_network(net):
     print(net)
     print('Total number of parameters: %d' % num_params)
 
-def save_images(images, size, image_path):
+def save_images(images, size, pix_dim, image_path):
     image = (np.squeeze(merge(images, size))+1.0)*127.5
-    header = np.zeros((1*size[0], 16*size[1], 3))
+    header = np.zeros((1*pix_dim, 16*pix_dim, 3))
     for idx in range(16):
-        header[:,idx*size[1]:(idx+1)*size[1]] = skimage.transform.resize(skimage.io.imread("./data/PoseUnit-stretch/samples/Pose_%02d_sequence_0001.ply.jpg"%(idx+2)), size)*256.0
+        header[:,idx*pix_dim:(idx+1)*pix_dim] = skimage.transform.resize(skimage.io.imread("./data/PoseUnit-stretch/samples/Pose_%02d_sequence_0001.ply.jpg"%(idx+2)), (pix_dim, pix_dim))*256.0
     image = np.concatenate((header, image), axis=0)
     return cv2.imwrite(image_path, image)
 

@@ -60,12 +60,9 @@ class decoder(nn.Module):
         self.decoder = ConvUpSampleDecoder(self.pix_dim, self.in_dim, 64, 4, self.norm_layer, self.nl_layer)
         init_net(self.decoder, 'kaiming')
       
-    def forward(self, input, label, phase='train'):
+    def forward(self, input, label):
         x = torch.cat([input, label], dim=1)
-        if phase == 'test':
-            self.decoder = self.decoder.to('cpu')
-        else:
-            self.decoder = self.decoder.to('cuda')
+        self.decoder = self.decoder.to('cuda')
         x = self.decoder(x)
 
         return x
@@ -309,7 +306,7 @@ def init_weights(net, init_type='normal', gain=0.02):
 def init_net(net, init_type='normal'):
     net = nn.DataParallel(net)
     init_weights(net, init_type)
-    return net.to(torch.device('cuda'))
+    return net.to('cuda')
 
 def get_scheduler(optimizer, opt):
     if opt.lr_policy == 'lambda':

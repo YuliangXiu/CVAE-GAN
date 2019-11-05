@@ -1,12 +1,12 @@
-python train_CVAE.py --dataset "PoseUnit-stretch" \
+python starter.py --dataset "PoseUnit-stretch" \
                         --data_dir "./data" \
-                        --epoch 5000 \
-                        --batch_size 256 \
+                        --epoch 10000 \
+                        --batch_size 550 \
                         --data_size -1 \
                         --z_dim 32 \
                         --y_dim 16 \
                         --pix_dim 64 \
-                        --gpus 0 \
+                        --gpus 0,1 \
                         --worker 48 \
-                        --lrG 1e-5 \
+                        --lrG 1e-4 \
                         --resume

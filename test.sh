@@ -1,11 +1,11 @@
 python starter.py --dataset "PoseUnit-stretch" \
                         --data_dir "./data" \
-                        --pkl "./checkpoint/VAE_data_PoseUnit-stretch_pix_64_batch_256_embed_32/PoseUnit-stretch_VAE.pkl" \
+                        --pkl "./checkpoint/VAE_data_PoseUnit-stretch_pix_64_batch_550_embed_32/PoseUnit-stretch" \
                         --batch_size 20 \
                         --data_size -1 \
                         --z_dim 32 \
                         --y_dim 16 \
                         --pix_dim 64 \
-                        --gpus 0 \
+                        --gpus 0,1 \
                         --worker 48 \
                         --testmode

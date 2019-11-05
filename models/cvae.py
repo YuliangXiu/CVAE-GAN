@@ -1,4 +1,4 @@
-import torch, time, os, pickle
+import torch, time, random, os, pickle
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
@@ -54,17 +54,17 @@ class CVAE(object):
         )
         
         # networks init
-        self.En = encoder(args, self.dataset)
-        self.De = decoder(args, self.dataset)
+        self.En = nn.DataParallel(encoder(args, self.dataset))
+        self.De = nn.DataParallel(decoder(args, self.dataset))
         self.CVAE = CVAE_T(args, self.En, self.De)
         
         if args.resume:
             self.load()
 
         if args.testmode:
-            self.load(args.pkl)            
+            self.load(args.pkl)         
             
-        self.CVAE_optimizer = optim.Adam(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08)
+        self.CVAE_optimizer = optim.AdamW(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08)
         # self.CVAE_scheduler = torch.optim.lr_scheduler.StepLR(self.CVAE_optimizer, step_size=50, gamma=0.3)
         self.CVAE_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.CVAE_optimizer, mode='min', factor=0.3, patience=5, verbose=True, threshold=1e-4)
         
@@ -77,7 +77,7 @@ class CVAE(object):
         self.sample_z_ = torch.zeros((self.sample_num * self.y_dim, self.z_dim))
         
         for i in range(self.sample_num):
-            self.sample_z_[i * self.y_dim] = torch.from_numpy(utils.gaussian(1, self.z_dim))
+            self.sample_z_[i * self.y_dim] = torch.from_numpy(utils.gaussian(1, self.z_dim, mean=random.uniform(-0.5,0.5), var=random.uniform(0.5,1.5)))
             for j in range(1, self.y_dim):
                 self.sample_z_[i * self.y_dim + j] = self.sample_z_[i * self.y_dim]
 
@@ -118,13 +118,11 @@ class CVAE(object):
             VAE_loss_total = []
             KL_loss_total = []
             LL_loss_total = []
-
-            # print("current_lr: ", self.CVAE_scheduler.get_lr())
+            
+            self.En.train()
+            self.De.train()
             
             for iter, (imgs, labels) in enumerate(self.trainset_loader):
-                
-                self.En.train()
-                self.De.train()
                 
                 x_ = imgs.to(self.device)
                 y_vec_ = labels.to(self.device)
@@ -138,7 +136,7 @@ class CVAE(object):
 
                 KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)
                 # LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask)/(self.batch_size)
-                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*5.0
+                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*50.0
                 VAE_loss = LL_loss + KL_loss
 
                 # print(dec.shape, x_.shape)
@@ -170,12 +168,12 @@ class CVAE(object):
             self.De.eval()
             
             with torch.no_grad():
-                samples = self.De(self.sample_z_, self.sample_y_, 'test')
-            samples = samples.numpy().transpose(0, 2, 3, 1)
+                samples = self.De(self.sample_z_.to(self.device), self.sample_y_.to(self.device))
+            samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
             tot_num_samples = self.sample_num * self.y_dim
             manifold_h = self.sample_num
             manifold_w = self.y_dim
-            utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w],
+            utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w], self.pix_dim,
                         utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
                         '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
             
@@ -233,7 +231,8 @@ class CVAE(object):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-        torch.save(self.CVAE.state_dict(), os.path.join(save_dir, self.dataset + '_VAE.pkl'))
+        torch.save(self.En.module.state_dict(), os.path.join(save_dir, self.dataset + '_encoder.pkl'))
+        torch.save(self.De.module.state_dict(), os.path.join(save_dir, self.dataset + '_decoder.pkl'))
 
         with open(os.path.join(save_dir, self.dataset + '_history.pkl'), 'wb') as f:
             pickle.dump(self.train_hist, f)
@@ -241,7 +240,9 @@ class CVAE(object):
     def load(self, pkl=None):
         if pkl is None:
             save_dir = os.path.join(self.save_dir, self.model_dir)
-            self.CVAE.load_state_dict(torch.load(os.path.join(save_dir, self.dataset + '_VAE.pkl')))
+            self.En.module.load_state_dict(torch.load(os.path.join(save_dir, self.dataset + '_encoder.pkl')))
+            self.De.module.load_state_dict(torch.load(os.path.join(save_dir, self.dataset + '_decoder.pkl')))
         else:
-            self.CVAE.load_state_dict(torch.load(pkl))
+            self.En.module.load_state_dict(torch.load(pkl + '_encoder.pkl'))
+            self.De.module.load_state_dict(torch.load(pkl + '_decoder.pkl'))
 
