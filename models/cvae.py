@@ -62,7 +62,8 @@ class CVAE(object):
             self.load()            
             
         self.CVAE_optimizer = optim.Adam(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08)
-        self.CVAE_scheduler = torch.optim.lr_scheduler.StepLR(self.CVAE_optimizer, step_size=5, gamma=0.3)
+        # self.CVAE_scheduler = torch.optim.lr_scheduler.StepLR(self.CVAE_optimizer, step_size=50, gamma=0.3)
+        self.CVAE_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.CVAE_optimizer, mode='min', factor=0.3, patience=5, verbose=True, threshold=1e-4)
         
         # to device
         self.CVAE.to(self.device)
@@ -105,6 +106,7 @@ class CVAE(object):
         assert viz.check_connection()
         iter_plot_loc = utils.create_loc_plot(viz, 'Iteration', 'Loss', '%s:(iter)'%(self.dataset), ['VAE', 'KL', 'LL'])
         epoch_plot_loc = utils.create_loc_plot(viz, 'Epoch', 'Loss', '%s:(epoch)'%(self.dataset), ['VAE', 'KL', 'LL'])
+        iter_plot_vis = utils.create_vis_plot(viz, 'Iter-Visualization', self.batch_size, self.pix_dim)
     
         start_time = time.time()
         for epoch in range(self.epoch):
@@ -113,7 +115,8 @@ class CVAE(object):
             VAE_loss_total = []
             KL_loss_total = []
             LL_loss_total = []
-            self.CVAE_scheduler.step()
+
+            # print("current_lr: ", self.CVAE_scheduler.get_lr())
             
             for iter, (imgs, labels) in enumerate(self.trainset_loader):
                 
@@ -127,11 +130,15 @@ class CVAE(object):
                 # update VAE network
                 dec = self.CVAE(x_, y_fill_, y_vec_)
                 self.CVAE_optimizer.zero_grad()
-                KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)
+
                 label_mask = torch.unsqueeze(self.mask[(labels==1.0).nonzero()[:,1]],1)
-                # LL_loss = self.L1_loss(dec*label_mask, x_*label_mask) 
-                LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask) 
+
+                KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)
+                # LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask)/(self.batch_size)
+                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*5.0
                 VAE_loss = LL_loss + KL_loss
+
+                # print(dec.shape, x_.shape)
                 
                 VAE_loss_total.append(VAE_loss.item())
                 KL_loss_total.append(KL_loss.item())
@@ -143,16 +150,17 @@ class CVAE(object):
 
                 VAE_loss.backward()
 
-                # print(torch.max(self.CVAE.parameters()), torch.min(self.CVAE.parameters()))
+                # gradient clipping
                 # torch.nn.utils.clip_grad_norm_(self.CVAE.parameters(), 5)
 
                 self.CVAE_optimizer.step()
 
-                if ((iter + 1) % 20) == 0:
+                if ((iter + 1) % (3)) == 0:
                     print("Epoch: [%2d] [%4d/%4d] time: %4.4f VAE_loss: %.8f KL_loss: %.8f LL_loss: %.8f" %
                           ((epoch + 1), (iter + 1), len(self.train_data) // self.batch_size, time.time() - start_time,
                            VAE_loss.item(), KL_loss.item(), LL_loss.item()))
                     utils.update_loc_plot(viz, iter_plot_loc, "iter", epoch, iter, self.sample_per_batch, [VAE_loss.item(), KL_loss.item(), LL_loss.item()])
+                    utils.update_vis_plot(viz, iter_plot_vis, self.batch_size, dec, x_)
                     
             # test samples
             self.En.eval()
@@ -168,7 +176,7 @@ class CVAE(object):
                         utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
                         '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
             
-            if epoch % 2 == 0:
+            if epoch % 10 == 0:
                 self.save()
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
             utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.sample_per_batch, [VAE_loss_total, KL_loss_total, LL_loss_total])
@@ -182,10 +190,13 @@ class CVAE(object):
         utils.generate_train_animation(self.result_dir + '/'+ self.model_dir + '/'+ self.dataset, self.epoch, len(self.train_data)/self.batch_size)
         utils.loss_VAE_plot(self.train_hist, os.path.join(self.save_dir, self.model_dir), self.dataset)
 
+        # change the lr
+        self.CVAE_scheduler.step(torch.mean(torch.FloatTensor(VAE_loss_total)))
+
     @property
     def model_dir(self):
-        return "VAE_data_{}_batch_{}_embed_{}".format(
-            self.dataset, self.batch_size, self.z_dim)
+        return "VAE_data_{}_pix_{}_batch_{}_embed_{}".format(
+            self.dataset, self.pix_dim, self.batch_size, self.z_dim)
 
     def save(self):
         save_dir = os.path.join(self.save_dir, self.model_dir)

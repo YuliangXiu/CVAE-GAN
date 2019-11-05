@@ -15,8 +15,9 @@ def print_network(net):
     print('Total number of parameters: %d' % num_params)
 
 def save_images(images, size, image_path):
-    image = np.squeeze(merge(images, size))
-    return cv2.imwrite(image_path, (image+1.0)*127.5)
+    image = (np.squeeze(merge(images, size))+1.0)*127.5
+    # return cv2.imwrite(image_path, cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_RGB2BGR))
+    return cv2.imwrite(image_path, image)
 
 def merge(images, size):
     h, w = images.shape[1], images.shape[2]
@@ -155,6 +156,20 @@ def create_loc_plot(viz, _xlabel, _ylabel, _title, legend):
         )
     )
 
+def create_vis_plot(viz, _title, batch, dim):
+    return viz.images(
+        np.random.randn(16, 3, dim, dim),
+        opts=dict(
+            title=_title, 
+        )
+    )
+
+def update_vis_plot(viz, window, batch, dec, x):
+    
+    dec_img = dec.detach().cpu().numpy()[:8]
+    x_img = x.detach().cpu().numpy()[:8]
+    viz.images(np.concatenate((x_img, dec_img),axis=0), nrow=8, padding=4, win=window)
+
 def update_loc_plot(viz, window, epoch_or_iter, epoch, i, batch_per_epoch, losses):
 
     if epoch_or_iter == 'epoch':
@@ -198,7 +213,7 @@ def generate_mask(stretch, dim, cls_num):
             cv2.imwrite(pngfile%(cls_id+2), 255*(1-dist))
             mask[cls_id, :, :] = 1-dist
 
-    np.save(npyfile, mask)
+        np.save(npyfile, mask)
     
     return torch.Tensor(mask)
 
