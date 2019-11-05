@@ -8,5 +8,5 @@ python starter.py --dataset "PoseUnit-stretch" \
                         --pix_dim 64 \
                         --gpus 0,1 \
                         --worker 48 \
-                        --lrG 1e-4 \
+                        --lrG 3e-5 \
                         --resume
