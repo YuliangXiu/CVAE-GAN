@@ -26,25 +26,21 @@ class BodyMapDataset(Dataset):
         self.device = torch.device('cuda') if device is None else device
         self.transform = transform
         self.pix_dim = (dim, dim, 3)
-        self.labeldim = 1
         self.cls_num = cls_num
-        self.im_root = os.path.join(data_root, dataset)
+        self.im_root = data_root
         
         # Prepare train/test split
         self.names = np.loadtxt(os.path.join(self.im_root, 'input_%s.txt'%(dataset)), dtype=str)[:max_size]
         self.len =  len(self.names)
         self.im_names = [os.path.join(self.im_root, 'GT_output', im_name) for im_name in self.names]
+        self.w_names = [os.path.join(self.im_root, 'Meshes', im_name[:-8]+".mat") for im_name in self.names]
     
     def __getitem__(self, id):
 
         img = self.transform(resize(imread(self.im_names[id]), self.pix_dim[:-1]))
-        # img = resize(imread(self.im_names[id]), self.pix_dim[:-1]).astype(float)
-        label = torch.Tensor([int(self.names[id].split("_")[1])-2]).type(torch.LongTensor)
-        y = torch.zeros(1, self.cls_num)
-        y[0, label]=1
-        print("Here")
+        label = torch.FloatTensor(sio.loadmat(self.w_names[id])['theta'].flatten())
 
-        return img, y.squeeze(0)
+        return img, label
         
     def __len__(self):
         return len(self.names)
@@ -52,19 +48,17 @@ class BodyMapDataset(Dataset):
 
 if __name__ == '__main__':
 
-    train_dataset = BodyMapDataset(data_root="./data", dataset="PoseUnit", cls_num=16, dim=256)
+    train_dataset = BodyMapDataset(data_root="./data", dataset="PoseRandom-stretch", cls_num=51, dim=256)
     trainset_loader = DataLoader(
         dataset=train_dataset,
-        batch_size=10,
+        batch_size=1,
         drop_last=True,
         shuffle=True,
         num_workers=10
     )
 
-    mean = torch.DoubleTensor([0.,0.,0.]).to('cuda')
     for idx, (img, label) in enumerate(trainset_loader):
-        mean = 0.9*mean + 0.1*torch.max(img.to('cuda').permute(0,2,3,1).reshape(-1,3), dim=0)[0] 
-        print(mean)
+        print(img.shape, label.shape)
     
     
     

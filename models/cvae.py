@@ -88,10 +88,6 @@ class CVAE(object):
 
         self.sample_y_ = torch.zeros((self.sample_num* self.y_dim, self.y_dim))
         self.sample_y_.scatter_(1, temp_y.type(torch.LongTensor), 1)
-        
-        self.fill = torch.zeros((self.y_dim, self.y_dim, self.pix_dim, self.pix_dim))
-        for i in range(self.y_dim):
-            self.fill[i, i, :, :] = 1
 
     def train(self):
         self.train_hist = {}
@@ -125,21 +121,23 @@ class CVAE(object):
             for iter, (imgs, labels) in enumerate(self.trainset_loader):
                 
                 x_ = imgs.to(self.device)
-                y_vec_ = labels.to(self.device)
-                y_fill_ = self.fill[torch.max(y_vec_, 1)[1].squeeze()].to(self.device)
+
+                y_vec_channels = torch.ones(labels.shape[0], labels.shape[1], self.pix_dim, self.pix_dim)
+                y_vec_channels *= labels[...,None, None]
+                y_vec_channels = y_vec_channels.to(self.device)
+
+                labels = labels.to(self.device)
                              
                 # update VAE network
-                dec = self.CVAE(x_, y_fill_, y_vec_)
+                dec = self.CVAE(x_, y_vec_channels, labels)
                 self.CVAE_optimizer.zero_grad()
 
-                label_mask = torch.unsqueeze(self.mask[(labels==1.0).nonzero()[:,1]],1)
+                # label_mask = torch.unsqueeze(self.mask[(labels==1.0).nonzero()[:,1]],1)
+                # LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask)/(self.batch_size)
 
                 KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)
-                # LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask)/(self.batch_size)
-                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*50.0
+                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*100.0
                 VAE_loss = LL_loss + KL_loss
-
-                # print(dec.shape, x_.shape)
                 
                 VAE_loss_total.append(VAE_loss.item())
                 KL_loss_total.append(KL_loss.item())
@@ -206,10 +204,15 @@ class CVAE(object):
             outs = []
             ins = []
             for iter, (imgs, labels) in enumerate(self.trainset_loader):
+
                 x_ = imgs.to(self.device)
-                y_vec_ = labels.to(self.device)
-                y_fill_ = self.fill[torch.max(y_vec_, 1)[1].squeeze()].to(self.device)
-                out = self.CVAE(x_, y_fill_, y_vec_)
+
+                y_vec_channels = torch.ones(labels.shape[0], labels.shape[1], self.pix_dim, self.pix_dim)
+                y_vec_channels *= labels[...,None, None]
+                y_vec_channels.to(self.device)
+                             
+                out = self.CVAE(x_, y_vec_channels, labels)
+            
                 out = out.detach().cpu().numpy().transpose(0, 2, 3, 1)
                 x_ = x_.detach().cpu().numpy().transpose(0, 2, 3, 1)
                 outs.append(out)
@@ -222,8 +225,8 @@ class CVAE(object):
 
     @property
     def model_dir(self):
-        return "VAE_data_{}_pix_{}_batch_{}_embed_{}".format(
-            self.dataset, self.pix_dim, self.batch_size, self.z_dim)
+        return "VAE_data_{}_pix_{}_batch_{}_embed_{}_label_{}".format(
+            self.dataset, self.pix_dim, self.batch_size, self.z_dim, self.y_dim)
 
     def save(self):
         save_dir = os.path.join(self.save_dir, self.model_dir)
