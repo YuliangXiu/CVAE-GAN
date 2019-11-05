@@ -59,7 +59,10 @@ class CVAE(object):
         self.CVAE = CVAE_T(args, self.En, self.De)
         
         if args.resume:
-            self.load()            
+            self.load()
+
+        if args.testmode:
+            self.load(args.pkl)            
             
         self.CVAE_optimizer = optim.Adam(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08)
         # self.CVAE_scheduler = torch.optim.lr_scheduler.StepLR(self.CVAE_optimizer, step_size=50, gamma=0.3)
@@ -193,6 +196,32 @@ class CVAE(object):
         # change the lr
         self.CVAE_scheduler.step(torch.mean(torch.FloatTensor(VAE_loss_total)))
 
+    def test(self):
+                    
+        # test samples
+        self.En.eval()
+        self.De.eval()
+        
+        with torch.no_grad():
+
+            iter_num = 10
+            outs = []
+            ins = []
+            for iter, (imgs, labels) in enumerate(self.trainset_loader):
+                x_ = imgs.to(self.device)
+                y_vec_ = labels.to(self.device)
+                y_fill_ = self.fill[torch.max(y_vec_, 1)[1].squeeze()].to(self.device)
+                out = self.CVAE(x_, y_fill_, y_vec_)
+                out = out.detach().cpu().numpy().transpose(0, 2, 3, 1)
+                x_ = x_.detach().cpu().numpy().transpose(0, 2, 3, 1)
+                outs.append(out)
+                ins.append(x_)
+
+            utils.save_images_test(ins, outs, iter_num, self.batch_size, [self.pix_dim, self.pix_dim],
+                        utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
+                        '_test_{:03d}.png'.format(iter_num))
+
+
     @property
     def model_dir(self):
         return "VAE_data_{}_pix_{}_batch_{}_embed_{}".format(
@@ -209,8 +238,10 @@ class CVAE(object):
         with open(os.path.join(save_dir, self.dataset + '_history.pkl'), 'wb') as f:
             pickle.dump(self.train_hist, f)
 
-    def load(self):
-        save_dir = os.path.join(self.save_dir, self.model_dir)
-
-        self.CVAE.load_state_dict(torch.load(os.path.join(save_dir, self.dataset + '_VAE.pkl')))
+    def load(self, pkl=None):
+        if pkl is None:
+            save_dir = os.path.join(self.save_dir, self.model_dir)
+            self.CVAE.load_state_dict(torch.load(os.path.join(save_dir, self.dataset + '_VAE.pkl')))
+        else:
+            self.CVAE.load_state_dict(torch.load(pkl))
 

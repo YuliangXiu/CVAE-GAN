@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
 import cv2
 import scipy.io as sio
+import skimage
 
 def print_network(net):
     num_params = 0
@@ -16,8 +17,20 @@ def print_network(net):
 
 def save_images(images, size, image_path):
     image = (np.squeeze(merge(images, size))+1.0)*127.5
-    # return cv2.imwrite(image_path, cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_RGB2BGR))
+    header = np.zeros((1*size[0], 16*size[1], 3))
+    for idx in range(16):
+        header[:,idx*size[1]:(idx+1)*size[1]] = skimage.transform.resize(skimage.io.imread("./data/PoseUnit-stretch/samples/Pose_%02d_sequence_0001.ply.jpg"%(idx+2)), size)*256.0
+    image = np.concatenate((header, image), axis=0)
     return cv2.imwrite(image_path, image)
+
+def save_images_test(in_images, out_images, iter_num, batch_size, image_size, image_path):
+    vis_image = np.zeros((image_size[0]*2*iter_num, batch_size*image_size[1], 3))
+    for iter in range(iter_num):
+        for idx in range(batch_size):
+            vis_image[(iter*2+0)*image_size[0]:(iter*2+1)*image_size[0], idx*image_size[1]:(idx+1)*image_size[1]] = in_images[iter][idx]
+            vis_image[(iter*2+1)*image_size[0]:(iter*2+2)*image_size[0], idx*image_size[1]:(idx+1)*image_size[1]] = out_images[iter][idx]
+        vis_image[(iter*2+2)*image_size[0]-1] *= 0
+    return cv2.imwrite(image_path, (vis_image+1.0)*127.5)
 
 def merge(images, size):
     h, w = images.shape[1], images.shape[2]

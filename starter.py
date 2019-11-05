@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--batch_size', type=int, default=50)
     parser.add_argument('--data_size', type=int, default=-1)
     parser.add_argument('--result_dir', default='result')
+    parser.add_argument('--pkl', default='')
     parser.add_argument('--save_dir', default='checkpoint')
     parser.add_argument('--z_dim', type=int, default=256)
     parser.add_argument('--y_dim', type=int, default=1000)
@@ -53,7 +54,11 @@ def main():
         os.mkdir(args.save_dir)
 
     model = CVAE(args)
-    model.train()
+    
+    if args.testmode:
+        model.test()
+    else:
+        model.train()
 
 if __name__ == '__main__':
     main()
