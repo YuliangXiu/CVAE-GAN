@@ -77,7 +77,7 @@ class CVAE(object):
         self.sample_z_ = torch.zeros((self.sample_num * self.y_dim, self.z_dim))
         
         for i in range(self.sample_num):
-            self.sample_z_[i * self.y_dim] = torch.from_numpy(utils.gaussian(1, self.z_dim, mean=random.uniform(-0.5,0.5), var=random.uniform(0.5,1.5)))
+            self.sample_z_[i * self.y_dim] = torch.from_numpy(utils.multi_gaussian(1, self.z_dim, np.load("mean-var.npy", allow_pickle=True).item()))
             for j in range(1, self.y_dim):
                 self.sample_z_[i * self.y_dim + j] = self.sample_z_[i * self.y_dim]
 

@@ -56,9 +56,13 @@ if __name__ == '__main__':
         shuffle=True,
         num_workers=10
     )
+    from tqdm import tqdm
+    mat = torch.zeros(4150, 51)
+    for idx, (img, label) in enumerate(tqdm(trainset_loader)):
+        mat[idx] = label.flatten()
+    np.save("mean-var.npy", {'mean':torch.mean(mat,dim=0).numpy(), 'std':torch.std(mat, dim=0).numpy()})
 
-    for idx, (img, label) in enumerate(trainset_loader):
-        print(img.shape, label.shape)
+    print(torch.mean(mat, dim=0), torch.std(mat, dim=0))
     
     
     

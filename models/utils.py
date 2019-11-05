@@ -153,6 +153,12 @@ def gaussian(batch_size, n_dim, mean=0, var=1, n_labels=10, use_label_info=False
         z = np.random.normal(mean, var, (batch_size, n_dim)).astype(np.float32)
         return z
 
+def multi_gaussian(batch_size, n_dim, mean_var):
+    z = np.zeros((batch_size, n_dim))
+    for i in range(n_dim):
+        z[:,i] = np.random.normal(mean_var['mean'][i], mean_var['std'][i], (batch_size, 1)).astype(np.float32)
+    return z
+
 def create_loc_plot(viz, _xlabel, _ylabel, _title, legend):
     return viz.line(
         X=np.zeros((1,len(legend))),
