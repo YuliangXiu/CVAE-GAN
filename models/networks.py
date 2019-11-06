@@ -57,12 +57,11 @@ class decoder(nn.Module):
         self.pix_dim = args.pix_dim
         self.in_dim = args.z_dim + args.y_dim
 
-        self.decoder = ConvUpSampleDecoder(self.pix_dim, self.in_dim, 64, 4, self.norm_layer, self.nl_layer)
+        self.decoder = ConvResDecoder(self.pix_dim, self.in_dim, 64, 6, self.norm_layer, self.nl_layer)
         init_net(self.decoder, 'kaiming')
       
     def forward(self, input, label):
         x = torch.cat([input, label], dim=1)
-        self.decoder = self.decoder.to('cuda')
         x = self.decoder(x)
 
         return x
@@ -79,7 +78,7 @@ class encoder(nn.Module):
         self.pix_dim = args.pix_dim
         self.in_dim = 3 + args.y_dim
 
-        self.encoder = ResNetEncoder(self.pix_dim, self.in_dim, self.z_dim, 64, 4, self.norm_layer, self.nl_layer)
+        self.encoder = ResNetEncoder(self.pix_dim, self.in_dim, self.z_dim, 64, 6, self.norm_layer, self.nl_layer)
         init_net(self.encoder, 'kaiming')
 
     def forward(self, input, label):

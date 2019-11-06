@@ -24,7 +24,7 @@ class CVAE(object):
     def __init__(self, args):
         # parameters
         self.epoch = args.epoch
-        self.sample_num = 10
+        self.sample_num = 5
         self.batch_size = args.batch_size
         self.save_dir = args.save_dir
         self.result_dir = args.result_dir
@@ -75,9 +75,10 @@ class CVAE(object):
 
         # fixed noise & condition
         self.sample_z_ = torch.zeros((self.sample_num * self.y_dim, self.z_dim))
+        # self.mean_var = np.load("mean-var.npy", allow_pickle=True).item()
         
         for i in range(self.sample_num):
-            self.sample_z_[i * self.y_dim] = torch.from_numpy(utils.multi_gaussian(1, self.z_dim, np.load("mean-var.npy", allow_pickle=True).item()))
+            self.sample_z_[i * self.y_dim] = torch.from_numpy(utils.gaussian(1, self.z_dim, mean=random.uniform(-0.5,0.5), var=random.uniform(0.5,1.5)))
             for j in range(1, self.y_dim):
                 self.sample_z_[i * self.y_dim + j] = self.sample_z_[i * self.y_dim]
 
@@ -160,23 +161,23 @@ class CVAE(object):
                            VAE_loss.item(), KL_loss.item(), LL_loss.item()))
                     utils.update_loc_plot(viz, iter_plot_loc, "iter", epoch, iter, self.sample_per_batch, [VAE_loss.item(), KL_loss.item(), LL_loss.item()])
                     utils.update_vis_plot(viz, iter_plot_vis, self.batch_size, dec, x_)
-                    
-            # test samples
-            self.En.eval()
-            self.De.eval()
-            
-            with torch.no_grad():
-                samples = self.De(self.sample_z_.to(self.device), self.sample_y_.to(self.device))
-            samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
-            tot_num_samples = self.sample_num * self.y_dim
-            manifold_h = self.sample_num
-            manifold_w = self.y_dim
-            utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w], self.pix_dim,
-                        utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
-                        '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
             
             if epoch % 10 == 0:
                 self.save()
+                # test samples after every epoch
+                torch.cuda.empty_cache()
+                with torch.no_grad():
+                    self.De.eval()
+                    samples = self.De(self.sample_z_, self.sample_y_)
+
+                samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
+                tot_num_samples = self.sample_num * self.y_dim
+                manifold_h = self.sample_num
+                manifold_w = self.y_dim
+                utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w], self.pix_dim,
+                            utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
+                            '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
+                            
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
             utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.sample_per_batch, [VAE_loss_total, KL_loss_total, LL_loss_total])
 
