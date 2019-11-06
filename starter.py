@@ -56,7 +56,7 @@ def main():
     model = CVAE(args)
     
     if args.testmode:
-        model.test()
+        model.test('ONEHOT')
     else:
         model.train()
 

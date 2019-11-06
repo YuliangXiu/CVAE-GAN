@@ -19,6 +19,13 @@ def save_images(images, size, pix_dim, image_path):
     image = (np.squeeze(merge(images, size))+1.0)*127.5
     return cv2.imwrite(image_path, image)
 
+def save_images_onehot(images, labels, image_dir):
+    for img_idx in range(images.shape[0]):
+        for lab_idx in range(images.shape[1]):
+            cv2.imwrite(os.path.join(image_dir, "vector_%03d_label_%03d.jpg"%(img_idx, lab_idx)), cv2.resize((images[img_idx, lab_idx]+1.0)*127.5, (512,512)))
+            np.save(os.path.join(image_dir, "vector_%03d_label_%03d.npy"%(img_idx, lab_idx)),labels[img_idx, lab_idx])
+
+
 def save_images_test(in_images, out_images, iter_num, batch_size, image_size, image_path):
     vis_image = np.zeros((image_size[0]*2*iter_num, batch_size*image_size[1], 3))
     for iter in range(iter_num):

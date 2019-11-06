@@ -7,6 +7,6 @@ python starter.py --dataset "PoseRandom-stretch" \
                         --y_dim 51 \
                         --pix_dim 64 \
                         --gpus 0,1 \
-                        --worker 48 \
-                        --lrG 1e-4 \
+                        --worker 100 \
+                        --lrG 5e-5 \
                         --resume

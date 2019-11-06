@@ -64,7 +64,7 @@ class CVAE(object):
         if args.testmode:
             self.load(args.pkl)         
             
-        self.CVAE_optimizer = optim.AdamW(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08)
+        self.CVAE_optimizer = optim.AdamW(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08, weight_decay=1e-4)
         # self.CVAE_scheduler = torch.optim.lr_scheduler.StepLR(self.CVAE_optimizer, step_size=50, gamma=0.3)
         self.CVAE_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.CVAE_optimizer, mode='min', factor=0.3, patience=5, verbose=True, threshold=1e-4)
         
@@ -73,22 +73,26 @@ class CVAE(object):
         self.L1_loss = nn.L1Loss().to(self.device)
         self.MSE_loss = nn.MSELoss().to(self.device)
 
-        # fixed noise & condition
-        self.sample_z_ = torch.zeros((self.sample_num * self.y_dim, self.z_dim))
-        # self.mean_var = np.load("mean-var.npy", allow_pickle=True).item()
-        
-        for i in range(self.sample_num):
-            self.sample_z_[i * self.y_dim] = torch.from_numpy(utils.gaussian(1, self.z_dim, mean=random.uniform(-0.5,0.5), var=random.uniform(0.5,1.5)))
-            for j in range(1, self.y_dim):
-                self.sample_z_[i * self.y_dim + j] = self.sample_z_[i * self.y_dim]
+        self.sample_z_ = None
+        self.sample_y_ = None
 
-        temp = torch.linspace(0, self.y_dim-1, self.y_dim).reshape(-1,1)
-        temp_y = torch.zeros((self.sample_num * self.y_dim, 1))
-        for i in range(self.sample_num):
-            temp_y[i * self.y_dim: (i + 1) * self.y_dim] = temp
+        self.do_sample(self.sample_num, self.y_dim, self.z_dim)
 
-        self.sample_y_ = torch.zeros((self.sample_num* self.y_dim, self.y_dim))
-        self.sample_y_.scatter_(1, temp_y.type(torch.LongTensor), 1)
+    def do_sample(self, sample_num, y_dim, z_dim):
+            self.sample_z_ = torch.zeros((sample_num * y_dim, z_dim))
+            self.sample_y_ = torch.zeros((sample_num * y_dim, y_dim))
+            
+            for i in range(sample_num):
+                self.sample_z_[i * y_dim] = torch.from_numpy(utils.gaussian(1, z_dim, mean=random.uniform(-0.5,0.5), var=random.uniform(0.5,1.5)))
+                for j in range(1, y_dim):
+                    self.sample_z_[i * y_dim + j] = self.sample_z_[i * y_dim]
+
+            temp = torch.linspace(0, y_dim-1, y_dim).reshape(-1,1)
+            temp_y = torch.zeros((sample_num * y_dim, 1))
+            for i in range(sample_num):
+                temp_y[i * y_dim: (i + 1) * y_dim] = temp
+
+            self.sample_y_.scatter_(1, temp_y.type(torch.LongTensor), 1)
 
     def train(self):
         self.train_hist = {}
@@ -151,7 +155,7 @@ class CVAE(object):
                 VAE_loss.backward()
 
                 # gradient clipping
-                # torch.nn.utils.clip_grad_norm_(self.CVAE.parameters(), 5)
+                torch.nn.utils.clip_grad_norm_(self.CVAE.parameters(), 1e-1)
 
                 self.CVAE_optimizer.step()
 
@@ -177,7 +181,7 @@ class CVAE(object):
                 utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w], self.pix_dim,
                             utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
                             '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
-                            
+
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
             utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.sample_per_batch, [VAE_loss_total, KL_loss_total, LL_loss_total])
 
@@ -193,35 +197,50 @@ class CVAE(object):
         # change the lr
         self.CVAE_scheduler.step(torch.mean(torch.FloatTensor(VAE_loss_total)))
 
-    def test(self):
-                    
-        # test samples
-        self.En.eval()
-        self.De.eval()
+    def test(self, flag='ED'):
         
-        with torch.no_grad():
-
-            iter_num = 10
-            outs = []
-            ins = []
-            for iter, (imgs, labels) in enumerate(self.trainset_loader):
-
-                x_ = imgs.to(self.device)
-
-                y_vec_channels = torch.ones(labels.shape[0], labels.shape[1], self.pix_dim, self.pix_dim)
-                y_vec_channels *= labels[...,None, None]
-                y_vec_channels.to(self.device)
-                             
-                out = self.CVAE(x_, y_vec_channels, labels)
+        if flag == 'ED':
+            # test Encoder-Decoder
+            self.En.eval()
+            self.De.eval()
             
-                out = out.detach().cpu().numpy().transpose(0, 2, 3, 1)
-                x_ = x_.detach().cpu().numpy().transpose(0, 2, 3, 1)
-                outs.append(out)
-                ins.append(x_)
+            with torch.no_grad():
 
-            utils.save_images_test(ins, outs, iter_num, self.batch_size, [self.pix_dim, self.pix_dim],
-                        utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
-                        '_test_{:03d}.png'.format(iter_num))
+                iter_num = 10
+                outs = []
+                ins = []
+                for iter, (imgs, labels) in enumerate(self.trainset_loader):
+
+                    x_ = imgs.to(self.device)
+
+                    y_vec_channels = torch.ones(labels.shape[0], labels.shape[1], self.pix_dim, self.pix_dim)
+                    y_vec_channels *= labels[...,None, None]
+                    y_vec_channels.to(self.device)
+                                
+                    out = self.CVAE(x_, y_vec_channels, labels)
+                
+                    out = out.detach().cpu().numpy().transpose(0, 2, 3, 1)
+                    x_ = x_.detach().cpu().numpy().transpose(0, 2, 3, 1)
+                    outs.append(out)
+                    ins.append(x_)
+
+                utils.save_images_test(ins, outs, iter_num, self.batch_size, [self.pix_dim, self.pix_dim],
+                            utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
+                            '_test_{:03d}.png'.format(iter_num))
+
+        elif flag == 'ONEHOT':
+
+            sample_num = 10
+            self.do_sample(sample_num, self.y_dim, self.z_dim)
+                    
+            with torch.no_grad():
+                self.De.eval() 
+                samples = self.De(self.sample_z_, self.sample_y_)
+
+            samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1).reshape(sample_num, self.y_dim, self.pix_dim, self.pix_dim, 3)
+            labels = self.sample_y_.detach().cpu().numpy().reshape(sample_num, self.y_dim, self.y_dim)
+
+            utils.save_images_onehot(samples, labels, utils.check_folder(self.result_dir + '/' + self.model_dir + "/samples"))
 
 
     @property
