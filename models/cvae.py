@@ -76,23 +76,23 @@ class CVAE(object):
         self.sample_z_ = None
         self.sample_y_ = None
 
+        self.mean = torch.FloatTensor(np.load('mean-var.npy', allow_pickle=True).item()['mean'])
+        self.var = torch.FloatTensor(np.load('mean-var.npy', allow_pickle=True).item()['std'])
         self.do_sample(self.sample_num, self.y_dim, self.z_dim)
 
-    def do_sample(self, sample_num, y_dim, z_dim):
-            self.sample_z_ = torch.zeros((sample_num * y_dim, z_dim))
-            self.sample_y_ = torch.zeros((sample_num * y_dim, y_dim))
-            
-            for i in range(sample_num):
-                self.sample_z_[i * y_dim] = torch.from_numpy(utils.gaussian(1, z_dim, mean=random.uniform(-0.5,0.5), var=random.uniform(0.5,1.5)))
-                for j in range(1, y_dim):
-                    self.sample_z_[i * y_dim + j] = self.sample_z_[i * y_dim]
+    def do_sample(self, sample_num, y_dim, z_dim, noise=1.0):
+        self.sample_z_ = torch.zeros((sample_num * y_dim, z_dim))
+        self.sample_y_ = torch.ones((sample_num * y_dim, y_dim))
+        
+        for i in range(sample_num):
+            self.sample_z_[i * y_dim] = torch.from_numpy(utils.gaussian(1, z_dim, mean=0.0, var=1.0))
+            for j in range(1, y_dim):
+                self.sample_z_[i * y_dim + j] = self.sample_z_[i * y_dim]
 
-            temp = torch.linspace(0, y_dim-1, y_dim).reshape(-1,1)
-            temp_y = torch.zeros((sample_num * y_dim, 1))
-            for i in range(sample_num):
-                temp_y[i * y_dim: (i + 1) * y_dim] = temp
-
-            self.sample_y_.scatter_(1, temp_y.type(torch.LongTensor), 1)
+        self.sample_y_ *= self.mean
+        for i in range(sample_num):
+            for j in range(y_dim):
+                self.sample_y_[i * y_dim + j, j] += noise * self.var[j]
 
     def train(self):
         self.train_hist = {}
@@ -140,8 +140,8 @@ class CVAE(object):
                 # label_mask = torch.unsqueeze(self.mask[(labels==1.0).nonzero()[:,1]],1)
                 # LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask)/(self.batch_size)
 
-                KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)
-                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*100.0
+                KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)*100.0
+                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*1.0
                 VAE_loss = LL_loss + KL_loss
                 
                 VAE_loss_total.append(VAE_loss.item())
@@ -230,17 +230,19 @@ class CVAE(object):
 
         elif flag == 'ONEHOT':
 
-            sample_num = 10
-            self.do_sample(sample_num, self.y_dim, self.z_dim)
-                    
-            with torch.no_grad():
-                self.De.eval() 
-                samples = self.De(self.sample_z_, self.sample_y_)
+            sample_num = 5
 
-            samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1).reshape(sample_num, self.y_dim, self.pix_dim, self.pix_dim, 3)
-            labels = self.sample_y_.detach().cpu().numpy().reshape(sample_num, self.y_dim, self.y_dim)
+            for noise in [-2.0, -1.0, 0.0,  1.0, 2.0]:
+                self.do_sample(sample_num, self.y_dim, self.z_dim, noise)
+                        
+                with torch.no_grad():
+                    self.De.eval() 
+                    samples = self.De(self.sample_z_, self.sample_y_)
 
-            utils.save_images_onehot(samples, labels, utils.check_folder(self.result_dir + '/' + self.model_dir + "/samples"))
+                samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1).reshape(sample_num, self.y_dim, self.pix_dim, self.pix_dim, 3)
+                labels = self.sample_y_.detach().cpu().numpy().reshape(sample_num, self.y_dim, self.y_dim)
+
+                utils.save_images_onehot(samples, labels, utils.check_folder(self.result_dir + '/' + self.model_dir + "/samples"), noise)
 
 
     @property

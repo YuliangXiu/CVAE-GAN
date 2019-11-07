@@ -4,6 +4,10 @@ import numpy as np
 import imageio
 import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+import seaborn as sns
+import matplotlib.pyplot as plt
 import cv2
 import scipy.io as sio
 import skimage
@@ -19,11 +23,12 @@ def save_images(images, size, pix_dim, image_path):
     image = (np.squeeze(merge(images, size))+1.0)*127.5
     return cv2.imwrite(image_path, image)
 
-def save_images_onehot(images, labels, image_dir):
+def save_images_onehot(images, labels, image_dir, noise):
     for img_idx in range(images.shape[0]):
         for lab_idx in range(images.shape[1]):
-            cv2.imwrite(os.path.join(image_dir, "vector_%03d_label_%03d.jpg"%(img_idx, lab_idx)), cv2.resize((images[img_idx, lab_idx]+1.0)*127.5, (512,512)))
-            np.save(os.path.join(image_dir, "vector_%03d_label_%03d.npy"%(img_idx, lab_idx)),labels[img_idx, lab_idx])
+            cv2.imwrite(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.jpg"%(img_idx, lab_idx, noise)), cv2.resize((images[img_idx, lab_idx]+1.0)*127.5, (512,512)))
+            # np.save(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.npy"%(img_idx, lab_idx, noise)),labels[img_idx, lab_idx])
+    # sio.savemat(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.mat"%(img_idx, lab_idx, noise)),{'weight': labels})
 
 
 def save_images_test(in_images, out_images, iter_num, batch_size, image_size, image_path):

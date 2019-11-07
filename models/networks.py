@@ -44,7 +44,8 @@ class CVAE_T(torch.nn.Module):
 def latent_loss(z_mean, z_stddev):
     mean_sq = z_mean * z_mean
     stddev_sq = z_stddev * z_stddev
-    return torch.mean(mean_sq + stddev_sq - torch.log(stddev_sq) - 1)
+    print(mean_sq, stddev_sq)
+    return torch.mean(mean_sq + stddev_sq - torch.log(1e-8 + stddev_sq) - 1)
 
 class decoder(nn.Module):
     # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
