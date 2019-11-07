@@ -19,28 +19,25 @@ im_trans = transforms.Compose([
 
 
 class BodyMapDataset(Dataset):
-    def __init__(self, data_root, dataset, dim=512, max_size=-1, device=None, transform=im_trans, cls_num=12):
+    def __init__(self, data_root, dataset, dim=512, max_size=-1, device=None, transform=im_trans):
         
         super(BodyMapDataset, self).__init__()
         # Set image transforms and device
         self.device = torch.device('cuda') if device is None else device
         self.transform = transform
         self.pix_dim = (dim, dim, 3)
-        self.cls_num = cls_num
         self.im_root = data_root
         
         # Prepare train/test split
         self.names = np.loadtxt(os.path.join(self.im_root, 'input_%s.txt'%(dataset)), dtype=str)[:max_size]
         self.len =  len(self.names)
         self.im_names = [os.path.join(self.im_root, 'GT_output', im_name) for im_name in self.names]
-        self.w_names = [os.path.join(self.im_root, 'Meshes', im_name[:-8]+".mat") for im_name in self.names]
     
     def __getitem__(self, id):
 
         img = self.transform(resize(imread(self.im_names[id]), self.pix_dim[:-1]))
-        label = torch.FloatTensor(sio.loadmat(self.w_names[id])['theta'].flatten())
 
-        return img, label
+        return img
         
     def __len__(self):
         return len(self.names)

@@ -40,9 +40,6 @@ def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpus
     import torch
     torch.backends.cudnn.benchmark = True
-    
-    # import torch.multiprocessing as mp
-    # mp.set_start_method('spawn')
 
     args.device = torch.device('cuda' if torch.cuda.is_available() else torch.device('cpu'))
 

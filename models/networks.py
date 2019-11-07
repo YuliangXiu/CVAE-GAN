@@ -36,15 +36,14 @@ class CVAE_T(torch.nn.Module):
 
         return mu + sigma * std_z
 
-    def forward(self, state, label1, label2):
-        h_enc = self.encoder(state, label1)
+    def forward(self, state):
+        h_enc = self.encoder(state)
         z = self._sample_latent(h_enc)
-        return self.decoder(z, label2)
+        return self.decoder(z)
 
 def latent_loss(z_mean, z_stddev):
     mean_sq = z_mean * z_mean
     stddev_sq = z_stddev * z_stddev
-    print(mean_sq, stddev_sq)
     return torch.mean(mean_sq + stddev_sq - torch.log(1e-8 + stddev_sq) - 1)
 
 class decoder(nn.Module):
@@ -56,13 +55,13 @@ class decoder(nn.Module):
         self.norm_layer = get_norm_layer(layer_type='batch')
         self.nl_layer = get_non_linearity(layer_type='lrelu')
         self.pix_dim = args.pix_dim
-        self.in_dim = args.z_dim + args.y_dim
+        self.in_dim = args.z_dim
 
         self.decoder = ConvResDecoder(self.pix_dim, self.in_dim, 64, 6, self.norm_layer, self.nl_layer)
         init_net(self.decoder, 'kaiming')
       
-    def forward(self, input, label):
-        x = torch.cat([input, label], dim=1)
+    def forward(self, input):
+        x = input
         x = self.decoder(x)
 
         return x
@@ -77,13 +76,13 @@ class encoder(nn.Module):
         self.norm_layer = get_norm_layer(layer_type='batch')
         self.nl_layer = get_non_linearity(layer_type='lrelu')
         self.pix_dim = args.pix_dim
-        self.in_dim = 3 + args.y_dim
+        self.in_dim = 3
 
         self.encoder = ResNetEncoder(self.pix_dim, self.in_dim, self.z_dim, 64, 6, self.norm_layer, self.nl_layer)
         init_net(self.encoder, 'kaiming')
 
-    def forward(self, input, label):
-        x = torch.cat([input, label], dim=1)
+    def forward(self, input):
+        x = input
         x = self.encoder(x)
 
         return x

@@ -24,22 +24,17 @@ class CVAE(object):
     def __init__(self, args):
         # parameters
         self.epoch = args.epoch
-        self.sample_num = 5
+        self.sample_num = 10
         self.batch_size = args.batch_size
         self.save_dir = args.save_dir
         self.result_dir = args.result_dir
         self.dataset = args.dataset
         self.device = args.device
-        self.y_dim = args.y_dim
         self.z_dim = args.z_dim
         self.pix_dim = args.pix_dim
         
-        # Load mask
-        # self.mask = utils.generate_mask("stretch" in self.dataset, self.pix_dim, self.y_dim).to(self.device)
-        self.mask = utils.generate_mask_guass("stretch" in self.dataset, self.pix_dim, self.y_dim).to(self.device)
-        
         # Load datasets
-        self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, max_size=args.data_size, dim=args.pix_dim, cls_num=args.y_dim)
+        self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, max_size=args.data_size, dim=args.pix_dim)
 
         self.sample_per_batch = len(self.train_data)/self.batch_size
         print("Trainset: %d \n"%(len(self.train_data)))
@@ -74,25 +69,14 @@ class CVAE(object):
         self.MSE_loss = nn.MSELoss().to(self.device)
 
         self.sample_z_ = None
-        self.sample_y_ = None
+        self.do_sample(self.sample_num, self.z_dim)
 
-        self.mean = torch.FloatTensor(np.load('mean-var.npy', allow_pickle=True).item()['mean'])
-        self.var = torch.FloatTensor(np.load('mean-var.npy', allow_pickle=True).item()['std'])
-        self.do_sample(self.sample_num, self.y_dim, self.z_dim)
+    def do_sample(self, sample_num, z_dim):
 
-    def do_sample(self, sample_num, y_dim, z_dim, noise=1.0):
-        self.sample_z_ = torch.zeros((sample_num * y_dim, z_dim))
-        self.sample_y_ = torch.ones((sample_num * y_dim, y_dim))
-        
-        for i in range(sample_num):
-            self.sample_z_[i * y_dim] = torch.from_numpy(utils.gaussian(1, z_dim, mean=0.0, var=1.0))
-            for j in range(1, y_dim):
-                self.sample_z_[i * y_dim + j] = self.sample_z_[i * y_dim]
-
-        self.sample_y_ *= self.mean
-        for i in range(sample_num):
-            for j in range(y_dim):
-                self.sample_y_[i * y_dim + j, j] += noise * self.var[j]
+        self.sample_z_ = torch.zeros((sample_num*sample_num, z_dim))
+        for i in range(sample_num*sample_num):
+            self.sample_z_[i] = torch.from_numpy(utils.gaussian(1, z_dim, mean=0.0, var=1.0))
+          
 
     def train(self):
         self.train_hist = {}
@@ -123,25 +107,16 @@ class CVAE(object):
             self.En.train()
             self.De.train()
             
-            for iter, (imgs, labels) in enumerate(self.trainset_loader):
+            for iter, imgs in enumerate(self.trainset_loader):
                 
                 x_ = imgs.to(self.device)
-
-                y_vec_channels = torch.ones(labels.shape[0], labels.shape[1], self.pix_dim, self.pix_dim)
-                y_vec_channels *= labels[...,None, None]
-                y_vec_channels = y_vec_channels.to(self.device)
-
-                labels = labels.to(self.device)
                              
                 # update VAE network
-                dec = self.CVAE(x_, y_vec_channels, labels)
+                dec = self.CVAE(x_)
                 self.CVAE_optimizer.zero_grad()
 
-                # label_mask = torch.unsqueeze(self.mask[(labels==1.0).nonzero()[:,1]],1)
-                # LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask)/(self.batch_size)
-
-                KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)*100.0
-                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*1.0
+                KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)*1.0
+                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*50.0
                 VAE_loss = LL_loss + KL_loss
                 
                 VAE_loss_total.append(VAE_loss.item())
@@ -172,12 +147,12 @@ class CVAE(object):
                 torch.cuda.empty_cache()
                 with torch.no_grad():
                     self.De.eval()
-                    samples = self.De(self.sample_z_, self.sample_y_)
+                    samples = self.De(self.sample_z_)
 
                 samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
-                tot_num_samples = self.sample_num * self.y_dim
+                tot_num_samples = self.sample_num * self.sample_num
                 manifold_h = self.sample_num
-                manifold_w = self.y_dim
+                manifold_w = self.sample_num
                 utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w], self.pix_dim,
                             utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
                             '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
@@ -209,16 +184,11 @@ class CVAE(object):
                 iter_num = 10
                 outs = []
                 ins = []
-                for iter, (imgs, labels) in enumerate(self.trainset_loader):
+                for iter, imgs in enumerate(self.trainset_loader):
 
                     x_ = imgs.to(self.device)
-
-                    y_vec_channels = torch.ones(labels.shape[0], labels.shape[1], self.pix_dim, self.pix_dim)
-                    y_vec_channels *= labels[...,None, None]
-                    y_vec_channels.to(self.device)
                                 
-                    out = self.CVAE(x_, y_vec_channels, labels)
-                
+                    out = self.CVAE(x_)
                     out = out.detach().cpu().numpy().transpose(0, 2, 3, 1)
                     x_ = x_.detach().cpu().numpy().transpose(0, 2, 3, 1)
                     outs.append(out)
@@ -228,27 +198,11 @@ class CVAE(object):
                             utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
                             '_test_{:03d}.png'.format(iter_num))
 
-        elif flag == 'ONEHOT':
-
-            sample_num = 5
-
-            for noise in [-2.0, -1.0, 0.0,  1.0, 2.0]:
-                self.do_sample(sample_num, self.y_dim, self.z_dim, noise)
-                        
-                with torch.no_grad():
-                    self.De.eval() 
-                    samples = self.De(self.sample_z_, self.sample_y_)
-
-                samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1).reshape(sample_num, self.y_dim, self.pix_dim, self.pix_dim, 3)
-                labels = self.sample_y_.detach().cpu().numpy().reshape(sample_num, self.y_dim, self.y_dim)
-
-                utils.save_images_onehot(samples, labels, utils.check_folder(self.result_dir + '/' + self.model_dir + "/samples"), noise)
-
 
     @property
     def model_dir(self):
-        return "VAE_data_{}_pix_{}_batch_{}_embed_{}_label_{}".format(
-            self.dataset, self.pix_dim, self.batch_size, self.z_dim, self.y_dim)
+        return "VAE_data_{}_pix_{}_batch_{}_embed_{}".format(
+            self.dataset, self.pix_dim, self.batch_size, self.z_dim)
 
     def save(self):
         save_dir = os.path.join(self.save_dir, self.model_dir)
