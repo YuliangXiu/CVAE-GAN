@@ -30,10 +30,15 @@ class BodyMapDataset(Dataset):
         self.im_root = data_root
         
         # Prepare train/test split
-        self.names = np.loadtxt(os.path.join(self.im_root, 'input_%s.txt'%(dataset)), dtype=str)[:max_size]
+        self.names_unit = np.loadtxt(os.path.join(self.im_root, 'input_PoseUnit.txt'), dtype=str)
+        self.names_unit = np.array(["PoseUnit_stretch/"+name_unit for name_unit in self.names_unit], dtype=str)
+        self.names_random = np.loadtxt(os.path.join(self.im_root, 'input_PoseRandom.txt'), dtype=str)
+        self.names_random = np.array(["PoseRandom_stretch/"+name_random for name_random in self.names_random], dtype=str)
+        self.names = np.concatenate((self.names_unit, self.names_random), axis=0)
+
         self.len =  len(self.names)
-        self.im_names = [os.path.join(self.im_root, 'GT_output', im_name) for im_name in self.names]
-        self.w_names = [os.path.join(self.im_root, 'Meshes', im_name[:-8]+".mat") for im_name in self.names]
+        self.im_names = [os.path.join(self.im_root, 'images', im_name) for im_name in self.names]
+        self.w_names = [os.path.join(self.im_root, 'weights', im_name[:-8]+".mat") for im_name in self.names]
     
     def __getitem__(self, id):
 

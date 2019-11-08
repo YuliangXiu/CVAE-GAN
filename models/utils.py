@@ -195,7 +195,7 @@ def update_vis_plot(viz, window, batch, dec, x):
     
     dec_img = dec.detach().cpu().numpy()[:8]
     x_img = x.detach().cpu().numpy()[:8]
-    viz.images(np.concatenate((x_img, dec_img),axis=0), nrow=8, padding=4, win=window)
+    viz.images((np.concatenate((x_img, dec_img),axis=0)+1.0)*127.5, nrow=8, padding=4, win=window)
 
 def update_loc_plot(viz, window, epoch_or_iter, epoch, i, batch_per_epoch, losses):
 

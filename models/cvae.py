@@ -140,8 +140,8 @@ class CVAE(object):
                 # label_mask = torch.unsqueeze(self.mask[(labels==1.0).nonzero()[:,1]],1)
                 # LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask)/(self.batch_size)
 
-                KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)*100.0
-                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*1.0
+                KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)*1.0
+                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*5.0
                 VAE_loss = LL_loss + KL_loss
                 
                 VAE_loss_total.append(VAE_loss.item())
@@ -159,14 +159,14 @@ class CVAE(object):
 
                 self.CVAE_optimizer.step()
 
-                if ((iter + 1) % (3)) == 0:
+                if ((iter + 1) % (10)) == 0:
                     print("Epoch: [%2d] [%4d/%4d] time: %4.4f VAE_loss: %.8f KL_loss: %.8f LL_loss: %.8f" %
                           ((epoch + 1), (iter + 1), len(self.train_data) // self.batch_size, time.time() - start_time,
                            VAE_loss.item(), KL_loss.item(), LL_loss.item()))
                     utils.update_loc_plot(viz, iter_plot_loc, "iter", epoch, iter, self.sample_per_batch, [VAE_loss.item(), KL_loss.item(), LL_loss.item()])
                     utils.update_vis_plot(viz, iter_plot_vis, self.batch_size, dec, x_)
             
-            if epoch % 10 == 0:
+            if epoch % 3 == 0:
                 self.save()
                 # test samples after every epoch
                 torch.cuda.empty_cache()
@@ -247,7 +247,7 @@ class CVAE(object):
 
     @property
     def model_dir(self):
-        return "VAE_data_{}_pix_{}_batch_{}_embed_{}_label_{}".format(
+        return "VAE_combine_{}_pix_{}_batch_{}_embed_{}_label_{}".format(
             self.dataset, self.pix_dim, self.batch_size, self.z_dim, self.y_dim)
 
     def save(self):
