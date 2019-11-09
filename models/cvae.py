@@ -148,17 +148,17 @@ class CVAE(object):
                 self.save()
                 # test samples after every epoch
                 torch.cuda.empty_cache()
-                with torch.no_grad():
-                    self.De.eval()
-                    samples = self.De(self.sample_z_)
+                # with torch.no_grad():
+                #     self.De.eval()
+                #     samples = self.De(self.sample_z_)
 
-                samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
-                tot_num_samples = self.sample_num * self.sample_num
-                manifold_h = self.sample_num
-                manifold_w = self.sample_num
-                utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w], self.pix_dim,
-                            utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
-                            '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
+                # samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
+                # tot_num_samples = self.sample_num * self.sample_num
+                # manifold_h = self.sample_num
+                # manifold_w = self.sample_num
+                # utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w], self.pix_dim,
+                #             utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
+                #             '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
 
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
             utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.sample_per_batch, [VAE_loss_total, KL_loss_total, LL_loss_total])
@@ -222,7 +222,7 @@ class CVAE(object):
                         utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples_short/')
 
                         cv2.imwrite(self.result_dir + '/' + self.model_dir + '/middle_samples_long/' +
-                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), ((comb+1.0)*127.5).transpose(1,0,2,3).reshape(256, 256*(middle_num+4), 3))
+                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), (comb*255.0).transpose(1,0,2,3).reshape(256, 256*(middle_num+4), 3))
 
                         utils.save_mats(self.result_dir + '/' + self.model_dir + '/middle_samples_short/' +
                         '_iter_{:03d}_start_{:03d}_end_{:03d}_mid_{:03d}.mat', iter, start, end, comb)

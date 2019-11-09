@@ -110,7 +110,7 @@ class ConvResDecoder(nn.Module):
         layers += [
             nn.ReflectionPad2d(3),
             nn.Conv2d(ngf, 3, kernel_size=7, stride=1, padding=0),
-            nn.Tanh(),
+            nn.Sigmoid(),
         ]
         self.conv = nn.Sequential(*layers)
         self.fc = nn.Sequential(
@@ -145,7 +145,7 @@ class ConvUpSampleDecoder(nn.Module):
         layers += [
             nn.ReflectionPad2d(3),
             nn.Conv2d(ngf, 3, kernel_size=7, stride=1, padding=0),
-            nn.Tanh(),
+            nn.Sigmoid(),
         ]
         self.conv = nn.Sequential(*layers)
         self.fc = nn.Sequential(

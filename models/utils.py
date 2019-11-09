@@ -20,7 +20,7 @@ def print_network(net):
     print('Total number of parameters: %d' % num_params)
 
 def save_images(images, size, pix_dim, image_path):
-    image = (np.squeeze(merge(images, size))+1.0)*127.5
+    image = np.squeeze(merge(images, size))*255.0
     return cv2.imwrite(image_path, image)
 
 def save_mats(path_format, iter, start, end, combs):
@@ -45,7 +45,7 @@ def save_images_test(in_images, out_images, iter_num, batch_size, image_size, im
             vis_image[(iter*2+0)*image_size[0]:(iter*2+1)*image_size[0], idx*image_size[1]:(idx+1)*image_size[1]] = in_images[iter][idx]
             vis_image[(iter*2+1)*image_size[0]:(iter*2+2)*image_size[0], idx*image_size[1]:(idx+1)*image_size[1]] = out_images[iter][idx]
         vis_image[(iter*2+2)*image_size[0]-1] *= 0
-    return cv2.imwrite(image_path, (vis_image+1.0)*127.5)
+    return cv2.imwrite(image_path, vis_image*255.0)
 
 def merge(images, size):
     h, w = images.shape[1], images.shape[2]
@@ -202,7 +202,7 @@ def update_vis_plot(viz, window, batch, dec, x):
     
     dec_img = dec.detach().cpu().numpy()[:8]
     x_img = x.detach().cpu().numpy()[:8]
-    viz.images(np.concatenate(((x_img+1.0)*127.5, (dec_img+1.0)*127.5),axis=0), nrow=8, padding=4, win=window)
+    viz.images(np.concatenate((x_img*255.0, dec_img*255.0),axis=0), nrow=8, padding=4, win=window)
 
 def update_loc_plot(viz, window, epoch_or_iter, epoch, i, batch_per_epoch, losses):
 
