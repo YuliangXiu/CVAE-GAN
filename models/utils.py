@@ -23,6 +23,17 @@ def save_images(images, size, pix_dim, image_path):
     image = (np.squeeze(merge(images, size))+1.0)*127.5
     return cv2.imwrite(image_path, image)
 
+def split_imgs(img_path, mid_num):
+    long_imgs = cv2.imread(img_path)
+    for i in range(mid_num):
+        cv2.imwrite(img_path[:-4].replace("long", "single")+"_mid_%03d"%(i)+".png", long_imgs[:,512*2+(512*i):512*2+(512*(i+1))])
+
+    cv2.imwrite(img_path[:-4].replace("long", "single")+"_ORIG_start"+".png", long_imgs[:,:512])
+    cv2.imwrite(img_path[:-4].replace("long", "single")+"_ORIG_end"+".png", long_imgs[:,-512:])
+    cv2.imwrite(img_path[:-4].replace("long", "single")+"_INFER_start"+".png", long_imgs[:,512:512*2])
+    cv2.imwrite(img_path[:-4].replace("long", "single")+"_INFER_end"+".png", long_imgs[:,-512*2:-512])
+
+
 def save_images_test(in_images, out_images, iter_num, batch_size, image_size, image_path):
     vis_image = np.zeros((image_size[0]*2*iter_num, batch_size*image_size[1], 3))
     for iter in range(iter_num):
@@ -265,7 +276,58 @@ def generate_mask_guass(stretch, dim, cls_num):
     
     return torch.Tensor(mask)
 
+def generate_mask_guass_details(stretch, dim, cls_num=16):
+    
+    matfile = "template_info/template_female_202" + "_stretch"*stretch + ".mat"
+    labelfile = "template_info/template_female_202" + "_stretch"*stretch + "_feature_pose_label.mat"
+    npyfile = "template_info/mask_guass" + "_stretch"*stretch + "_details.npy"
+    feature_points = sio.loadmat(matfile, squeeze_me=True)['para']['feature_uv'].item().astype(np.int32)
+    feature_points_label = sio.loadmat(labelfile, squeeze_me=True)['body_pose_index_feature_uv']
+
+    # pngfile = "template_info/guass_vis/guass" + "_details_stretch"*stretch + ".png"
+
+    if os.path.exists(npyfile):
+        mask = np.load(npyfile)
+    else:
+  
+        mask = np.zeros((cls_num, dim, dim))
+        x = np.linspace(0, dim-1, dim)
+        y = np.linspace(0, dim-1, dim)
+        x, y = np.meshgrid(x, y)
+
+        std = dim/10.0
+
+        for cls_id in range(cls_num):
+            for keypoint in feature_points[(feature_points_label[cls_id+1]-1).tolist(),:]:
+                mask[cls_id] += gaus2d(x, y, int((keypoint[0]-1)/(512/dim)), int((keypoint[1]-1)/(512/dim)), std, std)
+            mask[cls_id] = (mask[cls_id]-np.min(mask[cls_id]))/(np.max(mask[cls_id])-np.min(mask[cls_id]))
+        final_mask = np.ones((dim, dim)) + np.sum(mask[[2,5,11,15,10,14,1,4],:,:], axis=0) * 10
+        np.save(npyfile, final_mask)
+        # cv2.imwrite(pngfile, 64*final_mask)
+
+    return torch.Tensor(mask)
+
 if __name__ == '__main__':
-    generate_mask(True, 256, 16)
-    generate_mask_guass(True, 256, 16)
+    # generate_mask(True, 256, 16)
+    # generate_mask_guass(True, 256, 16)
+    # generate_mask_guass_details(True, 256, 16)
+
+    import numpy as np 
+    import scipy.io as sio
+    import time  
+
+    img_path = "/data/BodyParametricData/VAE_weights_data/input/Pose_sequence_00001.ply.jpg"
+    mat_path = "/data/BodyParametricData/VAE_weights_data/input/Pose_sequence_00001.ply.mat"
+    npy_path = "/data/BodyParametricData/VAE_weights_data/input/Pose_sequence_00001.ply.npy"
+    t0 = time.time()
+    img = cv2.imread(img_path)
+    print("JPG Time:", time.time()-t0)
+    t1 = time.time()
+    mat = sio.loadmat(mat_path, squeeze_me=True)['input']
+    print("MAT Time", time.time()-t1)
+    np.save(npy_path, mat)
+    t2 = time.time()
+    npy = np.load(npy_path)
+    print("NPY Time", time.time()-t1)
+
     

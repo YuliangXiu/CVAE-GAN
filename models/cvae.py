@@ -32,6 +32,8 @@ class CVAE(object):
         self.device = args.device
         self.z_dim = args.z_dim
         self.pix_dim = args.pix_dim
+
+        self.mask = utils.generate_mask_guass_details("stretch" in self.dataset, self.pix_dim).to(self.device)
         
         # Load datasets
         self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, max_size=args.data_size, dim=args.pix_dim)
@@ -116,7 +118,8 @@ class CVAE(object):
                 self.CVAE_optimizer.zero_grad()
 
                 KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)*1.0
-                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*50.0
+                LL_loss = self.MSE_loss(dec*self.mask, x_*self.mask)/(self.batch_size)*50.0
+
                 VAE_loss = LL_loss + KL_loss
                 
                 VAE_loss_total.append(VAE_loss.item())
@@ -174,7 +177,7 @@ class CVAE(object):
     
     @staticmethod
     def gpu2cpu(tensor):
-        return (tensor.detach().cpu().numpy().transpose(0,2,3,1)+1.0)*127.5
+        return cv2.resize((tensor.detach().cpu().numpy().transpose(1,2,0)+1.0)*127.5, (512,512))
 
 
     def test(self, flag='ED'):
@@ -192,27 +195,34 @@ class CVAE(object):
                 outs = []
                 ins = []
                 for iter, imgs in enumerate(self.trainset_loader):
-
                     x_ = imgs.to(self.device)
                     latent_vec = self.En(x_)
-                    pair = list(itertools.permutations(range(self.batch_size),2))
+                    pair = list(itertools.combinations(range(self.batch_size),2))
                     for (start,end) in pair:
-                        comb = np.zeros((4+middle_num, self.pix_dim, self.pix_dim, 3))
+                        comb = np.zeros((4+middle_num, 512, 512, 3))
                         
                         start_vec = latent_vec[start][None,...]
                         end_vec = latent_vec[end][None,...]
                         start_img = self.De(self.CVAE._sample_latent(start_vec))
                         end_img = self.De(self.CVAE._sample_latent(end_vec))
 
-                        comb[0], comb[1], comb[-2], comb[-1] = self.gpu2cpu(x_)[start], self.gpu2cpu(start_img)[0], self.gpu2cpu(end_img)[0], self.gpu2cpu(x_)[end]
+                        comb[0], comb[1], comb[-2], comb[-1] = self.gpu2cpu(x_[start]), self.gpu2cpu(start_img[0]), self.gpu2cpu(end_img[0]), self.gpu2cpu(x_[end])
 
                         for mid in range(middle_num):
                             mid_vec = end_vec * ((mid+1)/middle_num) + start_vec * ((middle_num-mid-1)/middle_num)
                             middle_img = self.De(self.CVAE._sample_latent(mid_vec))
-                            comb[2+mid] = self.gpu2cpu(middle_img)[0]
+                            comb[2+mid] = self.gpu2cpu(middle_img[0])
 
-                        cv2.imwrite(utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples/') +
-                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), comb.transpose(1,0,2,3).reshape(self.pix_dim, self.pix_dim*(middle_num+4), 3))
+                        utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples_long/')
+                        utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples_single/')
+
+                        cv2.imwrite(self.result_dir + '/' + self.model_dir + '/middle_samples_long/' +
+                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), comb.transpose(1,0,2,3).reshape(512, 512*(middle_num+4), 3))
+
+                        utils.split_imgs(self.result_dir + '/' + self.model_dir + '/middle_samples_long/' +
+                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), middle_num)
+                    #     break 
+                    # break
 
 
     @property
