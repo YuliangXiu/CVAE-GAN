@@ -36,7 +36,7 @@ class CVAE(object):
         
         # Load mask
         # self.mask = utils.generate_mask("stretch" in self.dataset, self.pix_dim, self.y_dim).to(self.device)
-        self.mask = utils.generate_mask_guass("stretch" in self.dataset, self.pix_dim, self.y_dim).to(self.device)
+        self.mask = utils.generate_mask_guass_details("stretch" in self.dataset, self.pix_dim).to(self.device)
         
         # Load datasets
         self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, max_size=args.data_size, dim=args.pix_dim, cls_num=args.y_dim)
@@ -64,7 +64,7 @@ class CVAE(object):
         if args.testmode:
             self.load(args.pkl)         
             
-        self.CVAE_optimizer = optim.AdamW(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08, weight_decay=1e-4)
+        self.CVAE_optimizer = optim.Adam(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08, weight_decay=1e-4)
         # self.CVAE_scheduler = torch.optim.lr_scheduler.StepLR(self.CVAE_optimizer, step_size=50, gamma=0.3)
         self.CVAE_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.CVAE_optimizer, mode='min', factor=0.3, patience=5, verbose=True, threshold=1e-4)
         
@@ -94,6 +94,21 @@ class CVAE(object):
             for j in range(y_dim):
                 self.sample_y_[i * y_dim + j, j] += noise * self.var[j]
 
+    def do_sample_multi(self, sample_num, y_dim, z_dim, noise=1.0):
+        self.sample_z_ = torch.zeros((sample_num * int(y_dim/3), z_dim))
+        self.sample_y_ = torch.ones((sample_num * int(y_dim/3), y_dim))
+        
+        for i in range(sample_num):
+            self.sample_z_[i * int(y_dim/3)] = torch.from_numpy(utils.gaussian(1, z_dim, mean=0.0, var=1.0))
+            for j in range(1, int(y_dim/3)):
+                self.sample_z_[i * int(y_dim/3) + j] = self.sample_z_[i * int(y_dim/3)]
+
+        self.sample_y_ *= self.mean
+        for i in range(sample_num):
+            for j in range(y_dim):
+                self.sample_y_[i * int(y_dim/3) + int(j/3), j] += noise * self.var[j]
+
+
     def train(self):
         self.train_hist = {}
         self.train_hist['VAE_loss'] = []
@@ -106,7 +121,7 @@ class CVAE(object):
         print('training start!!')
         
         # visdom
-        viz = Visdom(port=2000, env=self.dataset)
+        viz = Visdom(port=2001, env=self.dataset)
         assert viz.check_connection()
         iter_plot_loc = utils.create_loc_plot(viz, 'Iteration', 'Loss', '%s:(iter)'%(self.dataset), ['VAE', 'KL', 'LL'])
         epoch_plot_loc = utils.create_loc_plot(viz, 'Epoch', 'Loss', '%s:(epoch)'%(self.dataset), ['VAE', 'KL', 'LL'])
@@ -141,7 +156,7 @@ class CVAE(object):
                 # LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask)/(self.batch_size)
 
                 KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)*1.0
-                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*5.0
+                LL_loss = self.MSE_loss(dec*self.mask, x_*self.mask)/(self.batch_size)*5.0
                 VAE_loss = LL_loss + KL_loss
                 
                 VAE_loss_total.append(VAE_loss.item())
@@ -170,17 +185,17 @@ class CVAE(object):
                 self.save()
                 # test samples after every epoch
                 torch.cuda.empty_cache()
-                with torch.no_grad():
-                    self.De.eval()
-                    samples = self.De(self.sample_z_, self.sample_y_)
+                # with torch.no_grad():
+                #     self.De.eval()
+                #     samples = self.De(self.sample_z_, self.sample_y_)
 
-                samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
-                tot_num_samples = self.sample_num * self.y_dim
-                manifold_h = self.sample_num
-                manifold_w = self.y_dim
-                utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w], self.pix_dim,
-                            utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
-                            '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
+                # samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
+                # tot_num_samples = self.sample_num * self.y_dim
+                # manifold_h = self.sample_num
+                # manifold_w = self.y_dim
+                # utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w], self.pix_dim,
+                #             utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
+                #             '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
 
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
             utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.sample_per_batch, [VAE_loss_total, KL_loss_total, LL_loss_total])
@@ -196,6 +211,15 @@ class CVAE(object):
 
         # change the lr
         self.CVAE_scheduler.step(torch.mean(torch.FloatTensor(VAE_loss_total)))
+
+    @staticmethod
+    def gpu2cpu(tensor):
+        mean_ = np.array([-0.05437761, -0.04876839,  0.05751688]) 
+        std_ =np.array([0.10402182, 0.09962941, 0.11785846])
+        min_ = np.array([-7.39823482, -7.42358403, -6.69157885]) 
+        max_ = np.array([6.70985841, 6.54264821, 8.95325923])
+
+        return (tensor.detach().cpu().numpy().transpose(0,2,3,1)*(max_-min_)+min_)*std_+mean_
 
     def test(self, flag='ED'):
         
@@ -230,9 +254,9 @@ class CVAE(object):
 
         elif flag == 'ONEHOT':
 
-            sample_num = 5
+            sample_num = 1
 
-            for noise in [-2.0, -1.0, 0.0,  1.0, 2.0]:
+            for noise in [-5.0, -4.0, -3.0, -2.0, -1.0, 0.0,  1.0, 2.0, 3.0, 4.0, 5.0]:
                 self.do_sample(sample_num, self.y_dim, self.z_dim, noise)
                         
                 with torch.no_grad():
@@ -245,9 +269,27 @@ class CVAE(object):
                 utils.save_images_onehot(samples, labels, utils.check_folder(self.result_dir + '/' + self.model_dir + "/samples"), noise)
 
 
+        elif flag == 'MULTIHOT':
+    
+            sample_num = 1
+
+            for noise in [-5.0, -4.0, -3.0, -2.0, -1.0, 0.0,  1.0, 2.0, 3.0, 4.0, 5.0]:
+                self.do_sample_multi(sample_num, self.y_dim, self.z_dim, noise)
+                        
+                with torch.no_grad():
+                    self.De.eval() 
+                    samples = self.De(self.sample_z_, self.sample_y_)
+
+                samples = self.gpu2cpu(samples).reshape(sample_num, int(self.y_dim/3), self.pix_dim, self.pix_dim, 3)
+                labels = self.sample_y_.detach().cpu().numpy().reshape(sample_num, int(self.y_dim/3), self.y_dim)
+
+                utils.save_mats_multihot(samples, labels, utils.check_folder(self.result_dir + '/' + self.model_dir + "/samples_multi"), noise)
+                utils.save_images_onehot(samples, labels, utils.check_folder(self.result_dir + '/' + self.model_dir + "/samples_multi"), noise)
+
+
     @property
     def model_dir(self):
-        return "VAE_combine_{}_pix_{}_batch_{}_embed_{}_label_{}".format(
+        return "{}_pix_{}_batch_{}_embed_{}_label_{}".format(
             self.dataset, self.pix_dim, self.batch_size, self.z_dim, self.y_dim)
 
     def save(self):

@@ -20,13 +20,20 @@ def print_network(net):
     print('Total number of parameters: %d' % num_params)
 
 def save_images(images, size, pix_dim, image_path):
-    image = (np.squeeze(merge(images, size))+1.0)*127.5
+    image = np.squeeze(merge(images, size))*255.0
     return cv2.imwrite(image_path, image)
 
 def save_images_onehot(images, labels, image_dir, noise):
     for img_idx in range(images.shape[0]):
         for lab_idx in range(images.shape[1]):
-            cv2.imwrite(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.jpg"%(img_idx, lab_idx, noise)), cv2.resize((images[img_idx, lab_idx]+1.0)*127.5, (512,512)))
+            cv2.imwrite(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.jpg"%(img_idx, lab_idx, noise)), images[img_idx, lab_idx]*255.0)
+            # np.save(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.npy"%(img_idx, lab_idx, noise)),labels[img_idx, lab_idx])
+    # sio.savemat(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.mat"%(img_idx, lab_idx, noise)),{'weight': labels})
+
+def save_mats_multihot(images, labels, image_dir, noise):
+    for img_idx in range(images.shape[0]):
+        for lab_idx in range(images.shape[1]):
+            sio.savemat(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.mat"%(img_idx, lab_idx, noise)), {'output_global':images[img_idx, lab_idx]})
             # np.save(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.npy"%(img_idx, lab_idx, noise)),labels[img_idx, lab_idx])
     # sio.savemat(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.mat"%(img_idx, lab_idx, noise)),{'weight': labels})
 
@@ -38,7 +45,7 @@ def save_images_test(in_images, out_images, iter_num, batch_size, image_size, im
             vis_image[(iter*2+0)*image_size[0]:(iter*2+1)*image_size[0], idx*image_size[1]:(idx+1)*image_size[1]] = in_images[iter][idx]
             vis_image[(iter*2+1)*image_size[0]:(iter*2+2)*image_size[0], idx*image_size[1]:(idx+1)*image_size[1]] = out_images[iter][idx]
         vis_image[(iter*2+2)*image_size[0]-1] *= 0
-    return cv2.imwrite(image_path, (vis_image+1.0)*127.5)
+    return cv2.imwrite(image_path, vis_image*255.0)
 
 def merge(images, size):
     h, w = images.shape[1], images.shape[2]
@@ -195,7 +202,7 @@ def update_vis_plot(viz, window, batch, dec, x):
     
     dec_img = dec.detach().cpu().numpy()[:8]
     x_img = x.detach().cpu().numpy()[:8]
-    viz.images((np.concatenate((x_img, dec_img),axis=0)+1.0)*127.5, nrow=8, padding=4, win=window)
+    viz.images(np.concatenate((x_img, dec_img),axis=0)*255.0, nrow=8, padding=4, win=window)
 
 def update_loc_plot(viz, window, epoch_or_iter, epoch, i, batch_per_epoch, losses):
 
@@ -271,6 +278,38 @@ def generate_mask_guass(stretch, dim, cls_num):
             cv2.imwrite(pngfile%(cls_id+2), 255*(mask[cls_id]))
         np.save(npyfile, mask)
     
+    return torch.Tensor(mask)
+
+
+def generate_mask_guass_details(stretch, dim, cls_num=16):
+    
+    matfile = "template_info/template_female_202" + "_stretch"*stretch + ".mat"
+    labelfile = "template_info/template_female_202" + "_stretch"*stretch + "_feature_pose_label.mat"
+    npyfile = "template_info/mask_guass" + "_stretch"*stretch + "_details.npy"
+    feature_points = sio.loadmat(matfile, squeeze_me=True)['para']['feature_uv'].item().astype(np.int32)
+    feature_points_label = sio.loadmat(labelfile, squeeze_me=True)['body_pose_index_feature_uv']
+
+    # pngfile = "template_info/guass_vis/guass" + "_details_stretch"*stretch + ".png"
+
+    if os.path.exists(npyfile):
+        mask = np.load(npyfile)
+    else:
+  
+        mask = np.zeros((cls_num, dim, dim))
+        x = np.linspace(0, dim-1, dim)
+        y = np.linspace(0, dim-1, dim)
+        x, y = np.meshgrid(x, y)
+
+        std = dim/10.0
+
+        for cls_id in range(cls_num):
+            for keypoint in feature_points[(feature_points_label[cls_id+1]-1).tolist(),:]:
+                mask[cls_id] += gaus2d(x, y, int((keypoint[0]-1)/(512/dim)), int((keypoint[1]-1)/(512/dim)), std, std)
+            mask[cls_id] = (mask[cls_id]-np.min(mask[cls_id]))/(np.max(mask[cls_id])-np.min(mask[cls_id]))
+        final_mask = np.ones((dim, dim)) + np.sum(mask[[2,5,11,15,10,14,1,4],:,:], axis=0) * 10
+        np.save(npyfile, final_mask)
+        # cv2.imwrite(pngfile, 64*final_mask)
+
     return torch.Tensor(mask)
 
 if __name__ == '__main__':

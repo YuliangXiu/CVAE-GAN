@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--save_dir', default='checkpoint')
     parser.add_argument('--z_dim', type=int, default=256)
     parser.add_argument('--y_dim', type=int, default=1000)
-    parser.add_argument('--pix_dim', type=int, default=512)
+    parser.add_argument('--pix_dim', type=int, default=256)
     parser.add_argument('--cls_num', type=int, default=12)
     parser.add_argument('--gpus', type=str, default='0,1')
     parser.add_argument('--gan_type', type=str, default='VAE')
@@ -56,7 +56,8 @@ def main():
     model = CVAE(args)
     
     if args.testmode:
-        model.test('ONEHOT')
+        # model.test('ONEHOT')
+        model.test('MULTIHOT')
     else:
         model.train()
 
