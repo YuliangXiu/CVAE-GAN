@@ -305,7 +305,7 @@ def generate_mask_guass_details(stretch, dim, cls_num=16):
             for keypoint in feature_points[(feature_points_label[cls_id+1]-1).tolist(),:]:
                 mask[cls_id] += gaus2d(x, y, int((keypoint[0]-1)/(512/dim)), int((keypoint[1]-1)/(512/dim)), std, std)
             mask[cls_id] = (mask[cls_id]-np.min(mask[cls_id]))/(np.max(mask[cls_id])-np.min(mask[cls_id]))
-        final_mask = np.ones((dim, dim)) + np.sum(mask[[2,5,11,15,10,14,1,4],:,:], axis=0) * 10
+        final_mask = np.ones((dim, dim)) + np.sum(mask[[2,5,11,15,10,14,1,4],:,:], axis=0)
         np.save(npyfile, final_mask)
         # cv2.imwrite(pngfile, 64*final_mask)
 
@@ -364,17 +364,24 @@ if __name__ == '__main__':
     #                                 'after_min':np.min(scaled_big_mat.reshape(-1,3),axis=0)})
 
 
-    mat_dir = "/data/BodyParametricData/VAE_weights_data/GT_output"
-    npy_dir = "/data/BodyParametricData/VAE_weights_data/GT_output_npy"
-    data_num = 12000
-    big_mat = np.zeros((data_num, 256, 256, 3))
-    scaled_big_mat = np.zeros((data_num, 256, 256, 3))
+    # mat_dir = "/data/BodyParametricData/VAE_data/PoseUnit_stretch/GT_output"
+    # npy_dir = "/data/BodyParametricData/VAE_data/PoseUnit_stretch/GT_output_npy"
+    # data_num = 10200
+    # big_mat = np.zeros((data_num, 256, 256, 3))
+    # scaled_big_mat = np.zeros((data_num, 256, 256, 3))
 
-    for _,_, files in os.walk(mat_dir):
-        for fid, file in enumerate(tqdm(files)):
-            mat = sio.loadmat(os.path.join(mat_dir, file))['output_global']
-            # np.save(os.path.join(npy_dir, file)[:-4]+".npy", mat)
-            big_mat[fid] = mat
+    # for _,_, files in os.walk(mat_dir):
+    #     for fid, file in enumerate(tqdm(files)):
+    #         mat = sio.loadmat(os.path.join(mat_dir, file))['output_global']
+    #         # np.save(os.path.join(npy_dir, file)[:-4]+".npy", mat)
+    #         big_mat[fid] = mat
+
+    # np.save("vaeunit_data.npy", big_mat)
+
+
+    rand_mat = np.load("vaerandom_data.npy")[np.linspace(0,12000-1,4000).astype(np.int)]
+    unit_mat = np.load("vaeunit_data.npy")[np.linspace(0,10200-1,4000).astype(np.int)]
+    big_mat = np.concatenate((rand_mat, unit_mat), axis=0)
 
     mean_ = np.mean(big_mat.reshape(-1,3), axis=0)
     std_ = np.std(big_mat.reshape(-1,3), axis=0)
@@ -383,7 +390,7 @@ if __name__ == '__main__':
 
     scaled_big_mat = (big_mat-mean_)/std_
 
-    np.save("vaerandom_stats.npy", {'mean':mean_, 
+    np.save("vaeranunit_stats.npy", {'mean':mean_, 
                                     'std':std_,
                                     'min':min_,
                                     'max':max_,
