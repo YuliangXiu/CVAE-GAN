@@ -214,10 +214,10 @@ class CVAE(object):
 
     @staticmethod
     def gpu2cpu(tensor):
-        mean_ = np.array([-0.05437761, -0.04876839,  0.05751688]) 
-        std_ =np.array([0.10402182, 0.09962941, 0.11785846])
-        min_ = np.array([-7.39823482, -7.42358403, -6.69157885]) 
-        max_ = np.array([6.70985841, 6.54264821, 8.95325923])
+        mean_ = np.array([-0.03210393, -0.02885828,  0.02909984]) 
+        std_ =np.array([0.10642165, 0.08386147, 0.11332943])
+        min_ = np.array([-10.62554399,  -9.843649  , -10.25687804]) 
+        max_ = np.array([ 6.51756452,  9.55840837, 10.42095193])
 
         return (tensor.detach().cpu().numpy().transpose(0,2,3,1)*(max_-min_)+min_)*std_+mean_
 
