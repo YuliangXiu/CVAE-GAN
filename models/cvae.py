@@ -177,7 +177,12 @@ class CVAE(object):
     
     @staticmethod
     def gpu2cpu(tensor):
-        return cv2.resize((tensor.detach().cpu().numpy().transpose(1,2,0)+1.0)*127.5, (512,512))
+        mean_ = np.array([-0.05437761, -0.04876839,  0.05751688]) 
+        std_ =np.array([0.10402182, 0.09962941, 0.11785846])
+        min_ = np.array([-7.39823482, -7.42358403, -6.69157885]) 
+        max_ = np.array([6.70985841, 6.54264821, 8.95325923])
+
+        return (tensor.detach().cpu().numpy().transpose(1,2,0)*(max_-min_)+min_)*std_+mean_
 
 
     def test(self, flag='ED'):
@@ -199,7 +204,7 @@ class CVAE(object):
                     latent_vec = self.En(x_)
                     pair = list(itertools.combinations(range(self.batch_size),2))
                     for (start,end) in pair:
-                        comb = np.zeros((4+middle_num, 512, 512, 3))
+                        comb = np.zeros((4+middle_num, 256, 256, 3))
                         
                         start_vec = latent_vec[start][None,...]
                         end_vec = latent_vec[end][None,...]
@@ -214,20 +219,20 @@ class CVAE(object):
                             comb[2+mid] = self.gpu2cpu(middle_img[0])
 
                         utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples_long/')
-                        utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples_single/')
+                        utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples_short/')
 
                         cv2.imwrite(self.result_dir + '/' + self.model_dir + '/middle_samples_long/' +
-                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), comb.transpose(1,0,2,3).reshape(512, 512*(middle_num+4), 3))
+                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), ((comb+1.0)*127.5).transpose(1,0,2,3).reshape(256, 256*(middle_num+4), 3))
 
-                        utils.split_imgs(self.result_dir + '/' + self.model_dir + '/middle_samples_long/' +
-                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), middle_num)
-                    #     break 
-                    # break
+                        utils.save_mats(self.result_dir + '/' + self.model_dir + '/middle_samples_short/' +
+                        '_iter_{:03d}_start_{:03d}_end_{:03d}_mid_{:03d}.mat', iter, start, end, comb)
+                        break 
+                    break
 
 
     @property
     def model_dir(self):
-        return "VAE_data_{}_pix_{}_batch_{}_embed_{}".format(
+        return "{}_pix_{}_batch_{}_embed_{}".format(
             self.dataset, self.pix_dim, self.batch_size, self.z_dim)
 
     def save(self):

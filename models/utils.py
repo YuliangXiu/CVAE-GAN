@@ -23,6 +23,10 @@ def save_images(images, size, pix_dim, image_path):
     image = (np.squeeze(merge(images, size))+1.0)*127.5
     return cv2.imwrite(image_path, image)
 
+def save_mats(path_format, iter, start, end, combs):
+    for idx, item in enumerate(combs): 
+        sio.savemat(path_format.format(iter, start, end, idx), {'output_global':item})
+
 def split_imgs(img_path, mid_num):
     long_imgs = cv2.imread(img_path)
     for i in range(mid_num):
@@ -314,20 +318,78 @@ if __name__ == '__main__':
 
     import numpy as np 
     import scipy.io as sio
-    import time  
+    import time
+    from tqdm import tqdm  
 
-    img_path = "/data/BodyParametricData/VAE_weights_data/input/Pose_sequence_00001.ply.jpg"
-    mat_path = "/data/BodyParametricData/VAE_weights_data/input/Pose_sequence_00001.ply.mat"
-    npy_path = "/data/BodyParametricData/VAE_weights_data/input/Pose_sequence_00001.ply.npy"
-    t0 = time.time()
-    img = cv2.imread(img_path)
-    print("JPG Time:", time.time()-t0)
-    t1 = time.time()
-    mat = sio.loadmat(mat_path, squeeze_me=True)['input']
-    print("MAT Time", time.time()-t1)
-    np.save(npy_path, mat)
-    t2 = time.time()
-    npy = np.load(npy_path)
-    print("NPY Time", time.time()-t1)
+    # img_path = "/data/BodyParametricData/VAE_weights_data/input/Pose_sequence_00001.ply.jpg"
+    # mat_path = "/data/BodyParametricData/VAE_weights_data/input/Pose_sequence_00001.ply.mat"
+    # npy_path = "/data/BodyParametricData/VAE_weights_data/input/Pose_sequence_00001.ply.npy"
+    # t0 = time.time()
+    # img = cv2.imread(img_path)
+    # print("JPG Time:", time.time()-t0)
+    # t1 = time.time()
+    # mat = sio.loadmat(mat_path, squeeze_me=True)['input']
+    # print("MAT Time", time.time()-t1)
+    # np.save(npy_path, mat)
+    # t2 = time.time()
+    # npy = np.load(npy_path)
+    # print("NPY Time", time.time()-t1)
+
+    # cal mean, var, min, max
+
+    # mat_dir = "/data/BodyParametricData/VAE_data/PoseUnit_stretch/GT_output"
+    # npy_dir = "/data/BodyParametricData/VAE_data/PoseUnit_stretch/GT_output_npy"
+    # data_num = 10200
+    # big_mat = np.zeros((data_num, 256, 256, 3))
+    # scaled_big_mat = np.zeros((data_num, 256, 256, 3))
+
+    # for _,_, files in os.walk(mat_dir):
+    #     for fid, file in enumerate(tqdm(files)):
+    #         mat = sio.loadmat(os.path.join(mat_dir, file))['output_global']
+    #         # np.save(os.path.join(npy_dir, file)[:-4]+".npy", mat)
+    #         big_mat[fid] = mat
+
+    # mean_ = np.mean(big_mat.reshape(-1,3), axis=0)
+    # std_ = np.std(big_mat.reshape(-1,3), axis=0)
+    # min_ = np.min(big_mat.reshape(-1,3), axis=0)
+    # max_ = np.max(big_mat.reshape(-1,3), axis=0)
+
+    # scaled_big_mat = (big_mat-mean_)/std_
+
+    # np.save("vaeunit_stats.npy", {'mean':mean_, 
+    #                                 'std':std_,
+    #                                 'min':min_,
+    #                                 'max':max_,
+    #                                 'after_max':np.max(scaled_big_mat.reshape(-1,3),axis=0),
+    #                                 'after_min':np.min(scaled_big_mat.reshape(-1,3),axis=0)})
+
+
+    mat_dir = "/data/BodyParametricData/VAE_weights_data/GT_output"
+    npy_dir = "/data/BodyParametricData/VAE_weights_data/GT_output_npy"
+    data_num = 12000
+    big_mat = np.zeros((data_num, 256, 256, 3))
+    scaled_big_mat = np.zeros((data_num, 256, 256, 3))
+
+    for _,_, files in os.walk(mat_dir):
+        for fid, file in enumerate(tqdm(files)):
+            mat = sio.loadmat(os.path.join(mat_dir, file))['output_global']
+            # np.save(os.path.join(npy_dir, file)[:-4]+".npy", mat)
+            big_mat[fid] = mat
+
+    mean_ = np.mean(big_mat.reshape(-1,3), axis=0)
+    std_ = np.std(big_mat.reshape(-1,3), axis=0)
+    min_ = np.min(big_mat.reshape(-1,3), axis=0)
+    max_ = np.max(big_mat.reshape(-1,3), axis=0)
+
+    scaled_big_mat = (big_mat-mean_)/std_
+
+    np.save("vaerandom_stats.npy", {'mean':mean_, 
+                                    'std':std_,
+                                    'min':min_,
+                                    'max':max_,
+                                    'after_max':np.max(scaled_big_mat.reshape(-1,3),axis=0),
+                                    'after_min':np.min(scaled_big_mat.reshape(-1,3),axis=0)})
+
+
 
     
