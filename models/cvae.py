@@ -24,7 +24,7 @@ class CVAE(object):
     def __init__(self, args):
         # parameters
         self.epoch = args.epoch
-        self.sample_num = 10
+        self.sample_num = 5
         self.batch_size = args.batch_size
         self.save_dir = args.save_dir
         self.result_dir = args.result_dir
@@ -59,7 +59,7 @@ class CVAE(object):
         if args.testmode:
             self.load(args.pkl)         
             
-        self.CVAE_optimizer = optim.AdamW(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08, weight_decay=1e-4)
+        self.CVAE_optimizer = optim.Adam(self.CVAE.parameters(), lr=args.lrG, betas=(0.5, 0.999), eps=1e-08, weight_decay=1e-4)
         # self.CVAE_scheduler = torch.optim.lr_scheduler.StepLR(self.CVAE_optimizer, step_size=50, gamma=0.3)
         self.CVAE_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.CVAE_optimizer, mode='min', factor=0.3, patience=5, verbose=True, threshold=1e-4)
         
@@ -116,7 +116,7 @@ class CVAE(object):
                 self.CVAE_optimizer.zero_grad()
 
                 KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)*1.0
-                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*5.0
+                LL_loss = self.MSE_loss(dec, x_)/(self.batch_size)*50.0
                 VAE_loss = LL_loss + KL_loss
                 
                 VAE_loss_total.append(VAE_loss.item())
@@ -171,32 +171,48 @@ class CVAE(object):
 
         # change the lr
         self.CVAE_scheduler.step(torch.mean(torch.FloatTensor(VAE_loss_total)))
+    
+    @staticmethod
+    def gpu2cpu(tensor):
+        return (tensor.detach().cpu().numpy().transpose(0,2,3,1)+1.0)*127.5
+
 
     def test(self, flag='ED'):
+        import itertools
         
         if flag == 'ED':
+
             # test Encoder-Decoder
             self.En.eval()
             self.De.eval()
             
             with torch.no_grad():
 
-                iter_num = 10
+                middle_num = 10
                 outs = []
                 ins = []
                 for iter, imgs in enumerate(self.trainset_loader):
 
                     x_ = imgs.to(self.device)
-                                
-                    out = self.CVAE(x_)
-                    out = out.detach().cpu().numpy().transpose(0, 2, 3, 1)
-                    x_ = x_.detach().cpu().numpy().transpose(0, 2, 3, 1)
-                    outs.append(out)
-                    ins.append(x_)
+                    latent_vec = self.En(x_)
+                    pair = list(itertools.permutations(range(self.batch_size),2))
+                    for (start,end) in pair:
+                        comb = np.zeros((4+middle_num, self.pix_dim, self.pix_dim, 3))
+                        
+                        start_vec = latent_vec[start][None,...]
+                        end_vec = latent_vec[end][None,...]
+                        start_img = self.De(self.CVAE._sample_latent(start_vec))
+                        end_img = self.De(self.CVAE._sample_latent(end_vec))
 
-                utils.save_images_test(ins, outs, iter_num, self.batch_size, [self.pix_dim, self.pix_dim],
-                            utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
-                            '_test_{:03d}.png'.format(iter_num))
+                        comb[0], comb[1], comb[-2], comb[-1] = self.gpu2cpu(x_)[start], self.gpu2cpu(start_img)[0], self.gpu2cpu(end_img)[0], self.gpu2cpu(x_)[end]
+
+                        for mid in range(middle_num):
+                            mid_vec = end_vec * ((mid+1)/middle_num) + start_vec * ((middle_num-mid-1)/middle_num)
+                            middle_img = self.De(self.CVAE._sample_latent(mid_vec))
+                            comb[2+mid] = self.gpu2cpu(middle_img)[0]
+
+                        cv2.imwrite(utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples/') +
+                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), comb.transpose(1,0,2,3).reshape(self.pix_dim, self.pix_dim*(middle_num+4), 3))
 
 
     @property
