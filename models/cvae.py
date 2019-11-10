@@ -187,6 +187,7 @@ class CVAE(object):
         # change the lr
         self.CVAE_scheduler.step(torch.mean(torch.FloatTensor(VAE_loss_total)))
     
+    # random
     @staticmethod
     def gpu2cpu(tensor):
         mean_ = np.array([-0.05437761, -0.04876839,  0.05751688]) 
@@ -195,6 +196,15 @@ class CVAE(object):
         max_ = np.array([6.70985841, 6.54264821, 8.95325923])
 
         return (tensor.detach().cpu().numpy().transpose(1,2,0)*(max_-min_)+min_)*std_+mean_
+    # # poseunit
+    # @staticmethod
+    # def gpu2cpu(tensor):
+    #     mean_ = np.array([-0.00985059, -0.00904417,  0.00027268]) 
+    #     std_ =np.array([0.10433362, 0.05872985, 0.0996523 ])
+    #     min_ = np.array([-11.05148387, -14.44375436, -11.41507555]) 
+    #     max_ = np.array([ 6.43471079, 13.33603401, 12.70854703])
+
+    #     return (tensor.detach().cpu().numpy().transpose(1,2,0)*(max_-min_)+min_)*std_+mean_
 
 
     def test(self, flag='ED'):
@@ -217,9 +227,15 @@ class CVAE(object):
                     pair = list(itertools.combinations(range(self.batch_size),2))
                     for (start,end) in pair:
                         comb = np.zeros((4+middle_num, 256, 256, 3))
+                        comb_latent = torch.zeros(2+middle_num, 52*2)
                         
-                        start_vec = latent_vec[start][None,...]
-                        end_vec = latent_vec[end][None,...]
+                        start_vec = latent_vec[start][None, ...]
+                        end_vec = latent_vec[end][None, ...]
+
+                        # latent vecotr save
+                        comb_latent[0] = start_vec
+                        comb_latent[-1] = end_vec
+
                         start_img = self.De(self.CVAE._sample_latent(start_vec))
                         end_img = self.De(self.CVAE._sample_latent(end_vec))
 
@@ -230,6 +246,8 @@ class CVAE(object):
                             middle_img = self.De(self.CVAE._sample_latent(mid_vec))
                             comb[2+mid] = self.gpu2cpu(middle_img[0])
 
+                            comb_latent[1+mid] = mid_vec
+
                         utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples_long/')
                         utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples_short/')
 
@@ -238,8 +256,11 @@ class CVAE(object):
 
                         utils.save_mats(self.result_dir + '/' + self.model_dir + '/middle_samples_short/' +
                         '_iter_{:03d}_start_{:03d}_end_{:03d}_mid_{:03d}.mat', iter, start, end, comb)
-                        break 
-                    break
+                        
+                        np.save(self.result_dir + '/' + self.model_dir + '/middle_samples_long/' +
+                        '_iter_{:03d}_start_{:03d}_end_{:03d}.npy'.format(iter, start, end), comb_latent.detach().cpu().numpy())
+                    #     break 
+                    # break
 
 
     @property
