@@ -261,8 +261,11 @@ class MeshViewer(object):
         from pyrender.light import DirectionalLight
         from pyrender.node import Node
 
-        thetas = np.pi * np.array([1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0])
-        phis = np.pi * np.array([0.0, 2.0 / 3.0, 4.0 / 3.0])
+        # thetas = np.pi * np.array([1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0])
+        # phis = np.pi * np.array([0.0, 2.0 / 3.0, 4.0 / 3.0])
+
+        thetas = np.pi * np.array([1.0 / 6.0])
+        phis = np.pi * np.array([4.0 / 3.0])
 
         nodes = []
 
@@ -292,7 +295,7 @@ class MeshViewer(object):
             sys.stderr.write('Interactive viewer already uses raymond lighting!\n')
             return
         for n in self._add_raymond_light():
-            n.light.intensity = intensity / 3.0
+            n.light.intensity = intensity / 1.0
             if not self.scene.has_node(n):
                 self.scene.add_node(n)#, parent_node=pc)
 
@@ -319,6 +322,7 @@ class MeshViewer(object):
 
 
 if __name__ == '__main__':
+  
   smpl = SMPLModel('./model_male.pkl')
   np.random.seed(9608)
   pose = (np.random.rand(*smpl.pose_shape) - 0.5) * 0.
