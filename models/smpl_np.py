@@ -221,7 +221,6 @@ class MeshViewer(object):
         camera_pose[:3,3] = np.array([-1.0, 0.0, -0.1])
         camera_pose[:3,:3] = R.from_euler('zyx', [-90, -90, 0], degrees=True).as_dcm()
         self.cam_node = pyrender.Node(camera=self.pc, matrix=camera_pose)
-        # self.scene.add(self.pc, pose=camera_pose, name='pc-camera')
         self.scene.add_node(self.cam_node)
 
         self.figsize = (width, height)
@@ -307,6 +306,27 @@ class MeshViewer(object):
             flags |= RenderFlags.ALL_WIREFRAME
         elif self.render_wireframe:
             flags |= RenderFlags.ALL_WIREFRAME
+        color_img, depth = self.viewer.render(self.scene, flags=flags)
+        color_img = cv2.cvtColor(color_img, cv2.COLOR_BGR2RGB)
+
+        return color_img
+
+    def render_depth(self,render_wireframe=None):
+        from pyrender.constants import RenderFlags
+
+        flags = RenderFlags.DEPTH_ONLY #| RenderFlags.RGBA
+        if render_wireframe is not None and render_wireframe==True:
+            flags |= RenderFlags.ALL_WIREFRAME
+        elif self.render_wireframe:
+            flags |= RenderFlags.ALL_WIREFRAME
+        depth = self.viewer.render(self.scene, flags=flags)
+
+        return (depth-np.min(depth))/(np.max(depth)-np.min(depth))*255
+
+    def render_normal(self):
+        from pyrender.constants import RenderFlags
+
+        flags = RenderFlags.VERTEX_NORMALS | RenderFlags.FACE_NORMALS
         color_img, depth = self.viewer.render(self.scene, flags=flags)
         color_img = cv2.cvtColor(color_img, cv2.COLOR_BGR2RGB)
 

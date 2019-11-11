@@ -17,7 +17,6 @@ imw, imh = 200, 256
 mv = MeshViewer(width=imw, height=imh, use_offscreen=True)
 mv.set_background_color(colors['white'])
 floor_obj = trimesh.load_mesh("/home/ICT2000/yxiu/Pictures/CVPR2020/floor.obj")
-# imw, imh = 1000, 1000
 
 # for _,_,obj_paths in os.walk(obj_dir):
 #     for obj_path in tqdm(obj_paths):
@@ -56,6 +55,8 @@ floor_obj = trimesh.load_mesh("/home/ICT2000/yxiu/Pictures/CVPR2020/floor.obj")
 #         break 
 #     break
 
+#-------------------------------------------------------------------------------------------------------------------------------------------
+# single image testing
 
 # for _,_,obj_paths in os.walk(obj_dir):
 #     for obj_path in tqdm(obj_paths):
@@ -69,20 +70,16 @@ floor_obj = trimesh.load_mesh("/home/ICT2000/yxiu/Pictures/CVPR2020/floor.obj")
 #             camera_pose[:3,3] = np.array([0.0, -1.1, 0.0])
 #             camera_pose[:3,:3] = R.from_euler('zyx', [0, 0, 85], degrees=True).as_dcm()
 #             mv.update_camera(camera_pose)
-#             img1 = mv.render()
+#             img = mv.render_normal()
+#             # img = mv.render_depth()
 
-#             #right arm
-#             camera_pose[:3,3] = np.array([-1.0, 0.0, 0.4])
-#             camera_pose[:3,:3] = R.from_euler('zyx', [-90, -70, 0], degrees=True).as_dcm()
-#             mv.update_camera(camera_pose)
-#             img2 = mv.render()
-
-#             cv2.imwrite("/home/ICT2000/yxiu/Pictures/CVPR2020/floor.png", img1*0.5+img2*0.5)
+#             cv2.imwrite("/home/ICT2000/yxiu/Pictures/CVPR2020/floor.png", img)
 
 #             break 
 #         break 
 #     break
 
+#-------------------------------------------------------------------------------------------------------------------------------------------
 
 # fig, axes = plt.subplots(nrows=parts_num, ncols=std_num)
 
@@ -99,6 +96,10 @@ floor_obj = trimesh.load_mesh("/home/ICT2000/yxiu/Pictures/CVPR2020/floor.obj")
 # fig.tight_layout()
 # plt.subplots_adjust(left=0, right=1, bottom=0, top=1, wspace=0, hspace=0)
 # plt.savefig("/home/ICT2000/yxiu/Pictures/CVPR2020/vposer.png", dpi=512)
+
+
+#-------------------------------------------------------------------------------------------------------------------------------------------
+# multiple parts with multiple stds
 
 all_parts = range(17)
 not_include_parts = [0,12,15,16,3,6,8,14,9]
@@ -147,6 +148,8 @@ for _,_,obj_paths in os.walk(obj_dir):
                     mv.set_meshes([obj, floor_obj], 'static')
                     std_id = include_stds.index(std_id)
                     final[part_id*imh:(part_id+1)*imh, (std_id+1)*imw:(std_id+2)*imw] = mv.render()
+                    final[part_id*imh:(part_id+1)*imh, (std_id+2)*imw-2:(std_id+2)*imw] *= 0
+                    final[(part_id+1)*imh-2:(part_id+1)*imh, (std_id+1)*imw:(std_id+2)*imw] *= 0
                     if part_id not in std_objs.keys():
                         std_objs[part_id] = [part]
                     else:
@@ -155,9 +158,12 @@ for _,_,obj_paths in os.walk(obj_dir):
                     std_objs[part_id].append(floor_obj)
                     mv.set_meshes(std_objs[part_id], 'static')
                     final[part_id*imh:(part_id+1)*imh, :imw] = mv.render()
+                    final[((part_id+1)*imh-2):(part_id+1)*imh, :imw] *= 0
+                    final[part_id*imh:(part_id+1)*imh, imw-2:imw] *= 0
 
 cv2.imwrite("/home/ICT2000/yxiu/Pictures/CVPR2020/vposer_new.png", final)
 
+#-------------------------------------------------------------------------------------------------------------------------------------------
 
 # obj_dir = '/home/ICT2000/yxiu/Pictures/CVPR2020/middle_samples_infer/'
 # imw, imh = 150, 256
