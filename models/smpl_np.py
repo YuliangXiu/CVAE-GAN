@@ -215,7 +215,7 @@ class MeshViewer(object):
         self.trimesh_to_pymesh = pyrender.Mesh.from_trimesh
 
         self.scene = pyrender.Scene(bg_color=colors['white'], ambient_light=(0.3, 0.3, 0.3))
-        self.pc = pyrender.PerspectiveCamera(yfov=np.pi / 2.3, aspectRatio=float(width) / height)
+        self.pc = pyrender.PerspectiveCamera(yfov=np.pi / 1.8, aspectRatio=float(width) / height)
 
         camera_pose = np.eye(4)
         camera_pose[:3,3] = np.array([-1.0, 0.0, -0.1])

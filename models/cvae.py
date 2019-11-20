@@ -108,6 +108,7 @@ class CVAE(object):
         iter_plot_vis = utils.create_vis_plot(viz, 'Iter-Visualization', self.batch_size, self.pix_dim)
     
         start_time = time.time()
+
         for epoch in range(self.epoch):
             
             epoch_start_time = time.time()
@@ -196,6 +197,7 @@ class CVAE(object):
         max_ = np.array([6.70985841, 6.54264821, 8.95325923])
 
         return (tensor.detach().cpu().numpy().transpose(1,2,0)*(max_-min_)+min_)*std_+mean_
+
     # # poseunit
     # @staticmethod
     # def gpu2cpu(tensor):
@@ -252,15 +254,15 @@ class CVAE(object):
                         utils.check_folder(self.result_dir + '/' + self.model_dir + '/middle_samples_short/')
 
                         cv2.imwrite(self.result_dir + '/' + self.model_dir + '/middle_samples_long/' +
-                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), (comb*255.0).transpose(1,0,2,3).reshape(256, 256*(middle_num+4), 3))
+                        '_iter_{:03d}_start_{:03d}_end_{:03d}.png'.format(iter, start, end), ((comb+0.3)*127.5).transpose(1,0,2,3).reshape(256, 256*(middle_num+4), 3))
 
                         utils.save_mats(self.result_dir + '/' + self.model_dir + '/middle_samples_short/' +
                         '_iter_{:03d}_start_{:03d}_end_{:03d}_mid_{:03d}.mat', iter, start, end, comb)
                         
-                        np.save(self.result_dir + '/' + self.model_dir + '/middle_samples_long/' +
-                        '_iter_{:03d}_start_{:03d}_end_{:03d}.npy'.format(iter, start, end), comb_latent.detach().cpu().numpy())
-                    #     break 
-                    # break
+                        # np.save(self.result_dir + '/' + self.model_dir + '/middle_samples_long/' +
+                        # '_iter_{:03d}_start_{:03d}_end_{:03d}.npy'.format(iter, start, end), comb_latent.detach().cpu().numpy())
+                        # break 
+                    break
 
 
     @property
