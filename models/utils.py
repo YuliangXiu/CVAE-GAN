@@ -23,6 +23,10 @@ def save_images(images, size, pix_dim, image_path):
     image = np.squeeze(merge(images, size))*255.0
     return cv2.imwrite(image_path, image)
 
+def save_embeded(out, label, iter, out_dir):
+    np.save(os.path.join(out_dir, "out_%d.npy"%(iter)), out)
+    np.save(os.path.join(out_dir, "label_%d.npy"%(iter)), label)
+
 def save_images_onehot(images, labels, image_dir, noise):
     for img_idx in range(images.shape[0]):
         for lab_idx in range(images.shape[1]):
@@ -30,13 +34,12 @@ def save_images_onehot(images, labels, image_dir, noise):
             # np.save(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.npy"%(img_idx, lab_idx, noise)),labels[img_idx, lab_idx])
     # sio.savemat(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.mat"%(img_idx, lab_idx, noise)),{'weight': labels})
 
-def save_mats_multihot(images, labels, image_dir, noise):
+def save_mats_multihot(images, noise_id, image_dir):
     for img_idx in range(images.shape[0]):
-        for lab_idx in range(images.shape[1]):
-            sio.savemat(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.mat"%(img_idx, lab_idx, noise)), {'output_global':images[img_idx, lab_idx]})
-            # np.save(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.npy"%(img_idx, lab_idx, noise)),labels[img_idx, lab_idx])
-    # sio.savemat(os.path.join(image_dir, "vector_%03d_label_%03d_noise_%d.mat"%(img_idx, lab_idx, noise)),{'weight': labels})
-
+        sio.savemat(os.path.join(image_dir, 
+            "noise_%03d_part_%03d.mat"%(noise_id, img_idx)), 
+            {'output_global':images[img_idx]})
+          
 
 def save_images_test(in_images, out_images, iter_num, batch_size, image_size, image_path):
     vis_image = np.zeros((image_size[0]*2*iter_num, batch_size*image_size[1], 3))
@@ -172,6 +175,12 @@ def gaussian(batch_size, n_dim, mean=0, var=1, n_labels=10, use_label_info=False
         z = np.random.normal(mean, var, (batch_size, n_dim)).astype(np.float32)
         return z
 
+def gaussian_zid(batch_size, n_dim, zid, noise):
+   
+    z = np.zeros((batch_size, n_dim)).astype(np.float32)
+    z[:, zid] += noise
+    return z
+
 def multi_gaussian(batch_size, n_dim, mean_var):
     z = np.zeros((batch_size, n_dim))
     for i in range(n_dim):
@@ -208,7 +217,7 @@ def update_loc_plot(viz, window, epoch_or_iter, epoch, i, batch_per_epoch, losse
 
     if epoch_or_iter == 'epoch':
         x_arr = np.ones((1, ))*(epoch)
-        y_arr = torch.cat([torch.mean(torch.Tensor(loss)).unsqueeze(0)for loss in losses]).unsqueeze(0).detach().cpu().numpy()
+        y_arr = torch.cat([torch.mean(torch.Tensor(loss)).unsqueeze(0) for loss in losses]).unsqueeze(0).detach().cpu().numpy()
     elif epoch_or_iter == 'iter':
         x_arr = np.ones((1,len(losses)))*(epoch*batch_per_epoch+i)
         y_arr = torch.Tensor([loss for loss in losses]).unsqueeze(0).detach().cpu().numpy()
@@ -305,7 +314,7 @@ def generate_mask_guass_details(stretch, dim, cls_num=16):
         for cls_id in range(cls_num):
             for keypoint in feature_points[(feature_points_label[cls_id+1]-1).tolist(),:]:
                 mask[cls_id] += gaus2d(x, y, int((keypoint[0]-1)/(512/dim)), int((keypoint[1]-1)/(512/dim)), std, std)
-            mask[cls_id] = (mask[cls_id]-np.min(mask[cls_id]))/(np.max(mask[cls_id])-np.min(mask[cls_id]))
+            mask[cls_id] = (mask[cls_id] - np.min(mask[cls_id]))/(np.max(mask[cls_id])-np.min(mask[cls_id]))
         final_mask = np.ones((dim, dim)) + np.sum(mask[[2,5,11,15,10,14,1,4],:,:], axis=0) * 10
         np.save(npyfile, final_mask)
         # cv2.imwrite(pngfile, 64*final_mask)
@@ -313,6 +322,37 @@ def generate_mask_guass_details(stretch, dim, cls_num=16):
     return torch.Tensor(mask)
 
 if __name__ == '__main__':
-    generate_mask(True, 256, 16)
-    generate_mask_guass(True, 256, 16)
+    # generate_mask(True, 256, 16)
+    # generate_mask_guass(True, 256, 16)
+
+    data_dir = "/home/ICT2000/yxiu/Code/CVAE/result/embed/Weights_combine_stretch_pix_256_batch_12_embed_52_label_51"
+    std_dict = dict()
+    
+    for _,_,files in os.walk(data_dir):
+        for file in files:
+            if 'label' in file:
+                label = (np.load(os.path.join(data_dir, file)).nonzero()[1].reshape(-1,3)[:,0]/3).astype(np.int)
+                out_file = file.replace("label","out")
+                out = np.load(os.path.join(data_dir, out_file))
+
+                for lid, l in enumerate(label):
+                    if l not in std_dict.keys():
+                        std_dict[l] = [out[lid]]
+                    else:
+                        std_dict[l].append(out[lid])
+
+    rank = np.zeros((17,3))
+
+    def all_list(arr):
+        result = {}
+        for i in set(arr):
+            result[i] = arr.count(i)
+        return result
+
+    for i in range(17):
+        print("label %d\n:"%(i+1), np.argsort(np.std(np.array(std_dict[i]),axis=0))[-3:][::-1])
+        # print(np.mean(np.array(std_dict[i]),axis=0)[97])
+        rank[i] = np.argsort(np.std(np.array(std_dict[i]),axis=0))[-3:][::-1]
+
+    print(all_list(rank.flatten().tolist()))
     

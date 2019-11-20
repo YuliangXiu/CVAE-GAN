@@ -33,7 +33,8 @@ class BodyMapDataset(Dataset):
         self.names_unit = np.array(["PoseUnit_stretch/"+name_unit for name_unit in self.names_unit], dtype=str)
         self.names_random = np.loadtxt(os.path.join(self.im_root, 'input_PoseRandom.txt'), dtype=str)
         self.names_random = np.array(["PoseRandom_stretch/"+name_random for name_random in self.names_random], dtype=str)
-        self.names = np.concatenate((self.names_unit, self.names_random), axis=0)
+        # self.names = np.concatenate((self.names_unit, self.names_random), axis=0)
+        self.names = self.names_unit
 
         self.len =  len(self.names)
         self.im_names = [os.path.join(self.im_root, 'npys', im_name) for im_name in self.names]

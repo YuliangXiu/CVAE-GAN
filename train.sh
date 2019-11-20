@@ -8,5 +8,5 @@ python starter.py --dataset "Weights_combine_stretch" \
                         --pix_dim 256 \
                         --gpus 1 \
                         --worker 64 \
-                        --lrG 1e-4 \
-                        # --resume
+                        --lrG 5e-5 \
+                        --resume

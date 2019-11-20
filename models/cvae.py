@@ -75,9 +75,11 @@ class CVAE(object):
 
         self.sample_z_ = None
         self.sample_y_ = None
-
+        
+        # weights mean and var
         self.mean = torch.FloatTensor(np.load('mean-var.npy', allow_pickle=True).item()['mean'])
         self.var = torch.FloatTensor(np.load('mean-var.npy', allow_pickle=True).item()['std'])
+        
         self.do_sample(self.sample_num, self.y_dim, self.z_dim)
 
     def do_sample(self, sample_num, y_dim, z_dim, noise=1.0):
@@ -94,19 +96,28 @@ class CVAE(object):
             for j in range(y_dim):
                 self.sample_y_[i * y_dim + j, j] += noise * self.var[j]
 
-    def do_sample_multi(self, sample_num, y_dim, z_dim, noise=1.0):
-        self.sample_z_ = torch.zeros((sample_num * int(y_dim/3), z_dim))
-        self.sample_y_ = torch.ones((sample_num * int(y_dim/3), y_dim))
+    def do_sample_multi(self, y_dim, z_dim, noise, common_z):
+
+        noise_number = len(noise)
+        self.sample_z_ = torch.ones((noise_number, int(y_dim/3), z_dim))
+        self.sample_y_ = torch.zeros((noise_number, int(y_dim/3), y_dim))
+        self.sample_z_ *= common_z
+
+        for noise_id in range(len(noise)):
+            for part_id in range(int(y_dim/3)):
+                self.sample_y_[noise_id, part_id, part_id*3:(part_id+1)*3] += noise[noise_id] * \
+                                        self.var[part_id*3:(part_id+1)*3]
+
+
+    def do_sample_multi_zid(self, y_dim, z_dim, noise=1.0):
+
+        self.sample_z_ = torch.zeros((z_dim, z_dim)) # 52
+        self.sample_y_ = torch.ones((z_dim, y_dim)) # 17*3
         
-        for i in range(sample_num):
-            self.sample_z_[i * int(y_dim/3)] = torch.from_numpy(utils.gaussian(1, z_dim, mean=0.0, var=1.0))
-            for j in range(1, int(y_dim/3)):
-                self.sample_z_[i * int(y_dim/3) + j] = self.sample_z_[i * int(y_dim/3)]
+        for i in range(z_dim):
+            self.sample_z_[i] = torch.from_numpy(utils.gaussian_zid(1, z_dim, zid=i, noise=noise))
 
         self.sample_y_ *= self.mean
-        for i in range(sample_num):
-            for j in range(y_dim):
-                self.sample_y_[i * int(y_dim/3) + int(j/3), j] += noise * self.var[j]
 
 
     def train(self):
@@ -121,8 +132,12 @@ class CVAE(object):
         print('training start!!')
         
         # visdom
+        viz = Visdom(port=2001)
+        if self.dataset in viz.get_env_list():
+            viz.delete_env(self.dataset)
         viz = Visdom(port=2001, env=self.dataset)
         assert viz.check_connection()
+
         iter_plot_loc = utils.create_loc_plot(viz, 'Iteration', 'Loss', '%s:(iter)'%(self.dataset), ['VAE', 'KL', 'LL'])
         epoch_plot_loc = utils.create_loc_plot(viz, 'Epoch', 'Loss', '%s:(epoch)'%(self.dataset), ['VAE', 'KL', 'LL'])
         iter_plot_vis = utils.create_vis_plot(viz, 'Iter-Visualization', self.batch_size, self.pix_dim)
@@ -156,7 +171,7 @@ class CVAE(object):
                 # LL_loss = self.MSE_loss(dec*label_mask, x_*label_mask)/(self.batch_size)
 
                 KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)*1.0
-                LL_loss = self.MSE_loss(dec*self.mask, x_*self.mask)/(self.batch_size)*5.0
+                LL_loss = self.MSE_loss(dec*self.mask, x_*self.mask)/(self.batch_size)*1.0
                 VAE_loss = LL_loss + KL_loss
                 
                 VAE_loss_total.append(VAE_loss.item())
@@ -220,6 +235,9 @@ class CVAE(object):
         max_ = np.array([ 6.51756452,  9.55840837, 10.42095193])
 
         return (tensor.detach().cpu().numpy().transpose(0,2,3,1)*(max_-min_)+min_)*std_+mean_
+    @staticmethod
+    def gpu2img(tensor):
+        return tensor.detach().cpu().numpy().transpose(0,2,3,1)*255.0
 
     def test(self, flag='ED'):
         
@@ -252,6 +270,25 @@ class CVAE(object):
                             utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
                             '_test_{:03d}.png'.format(iter_num))
 
+        elif flag == 'En-embed':
+            # test Encoder-Decoder
+            self.En.eval()
+            self.De.eval()
+            
+            with torch.no_grad():
+
+                for iter, (imgs, labels) in enumerate(self.trainset_loader):
+
+                    x_ = imgs.to(self.device)
+
+                    y_vec_channels = torch.ones(labels.shape[0], labels.shape[1], self.pix_dim, self.pix_dim)
+                    y_vec_channels *= labels[...,None, None]
+                    y_vec_channels.to(self.device)
+                                
+                    out = self.En(x_, y_vec_channels)
+                    utils.save_embeded(out.detach().cpu().numpy(), labels.detach().cpu().numpy(), iter, utils.check_folder(self.result_dir + '/embed/' + self.model_dir))
+
+
         elif flag == 'ONEHOT':
 
             sample_num = 1
@@ -271,20 +308,39 @@ class CVAE(object):
 
         elif flag == 'MULTIHOT':
     
-            sample_num = 1
+            noise = range(-5,5)
+            common_z = torch.from_numpy(utils.gaussian(1, self.z_dim, mean=0.0, var=1.0))
+            self.do_sample_multi(self.y_dim, self.z_dim, noise, common_z)
 
-            for noise in [-5.0, -4.0, -3.0, -2.0, -1.0, 0.0,  1.0, 2.0, 3.0, 4.0, 5.0]:
-                self.do_sample_multi(sample_num, self.y_dim, self.z_dim, noise)
-                        
+            for noise_id in range(len(noise)):
                 with torch.no_grad():
                     self.De.eval() 
+                    samples = self.De(self.sample_z_[noise_id].reshape(-1, self.z_dim), 
+                                        self.sample_y_[noise_id].reshape(-1, self.y_dim))
+
+                samples = self.gpu2cpu(samples).reshape(int(self.y_dim/3), self.pix_dim, self.pix_dim, 3)
+
+                utils.save_mats_multihot(samples, noise_id, \
+                    utils.check_folder(self.result_dir + '/' + \
+                        self.model_dir + "/samples_multi_mats_onehotY"))
+
+        elif flag == 'ZID':
+            
+            for noise in [-1000, -100, -10, 0, 10, 100, 1000]:
+                self.do_sample_multi_zid(self.y_dim, self.z_dim, noise)
+
+                with torch.no_grad():
                     samples = self.De(self.sample_z_, self.sample_y_)
 
-                samples = self.gpu2cpu(samples).reshape(sample_num, int(self.y_dim/3), self.pix_dim, self.pix_dim, 3)
-                labels = self.sample_y_.detach().cpu().numpy().reshape(sample_num, int(self.y_dim/3), self.y_dim)
+                samples_npy = self.gpu2cpu(samples).reshape(self.z_dim, self.pix_dim, self.pix_dim, 3)
+                samples = self.gpu2img(samples).reshape(self.z_dim, self.pix_dim, self.pix_dim, 3)
+                
 
-                utils.save_mats_multihot(samples, labels, utils.check_folder(self.result_dir + '/' + self.model_dir + "/samples_multi"), noise)
-                utils.save_images_onehot(samples, labels, utils.check_folder(self.result_dir + '/' + self.model_dir + "/samples_multi"), noise)
+                for idx, sample in enumerate(samples):
+                    cv2.imwrite(utils.check_folder(self.result_dir + '/' + self.model_dir + "/foryajie/%d/"%(noise))+"%d.jpg"%(idx), sample)
+                    np.save(os.path.join(utils.check_folder(self.result_dir + '/' + self.model_dir + "/foryajie/%d/"%(noise)), "%d.npy"%(idx)), samples_npy[idx])
+
+            
 
 
     @property

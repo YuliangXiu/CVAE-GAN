@@ -56,8 +56,8 @@ def main():
     model = CVAE(args)
     
     if args.testmode:
-        # model.test('ONEHOT')
         model.test('MULTIHOT')
+        # model.test('ZID')
     else:
         model.train()
 

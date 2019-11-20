@@ -1,7 +1,7 @@
-python starter.py --dataset "PoseRandom-stretch" \
+python starter.py --dataset "Weights_combine_stretch" \
                         --data_dir "./data" \
-                        --pkl "./checkpoint/VAE_combine_PoseRandom-stretch_pix_256_batch_48_embed_52_label_51/PoseRandom-stretch" \
-                        --batch_size 12 \
+                        --pkl "./checkpoint/Weights_combine_stretch_pix_256_batch_16_embed_52_label_51/Weights_combine_stretch" \
+                        --batch_size 1 \
                         --data_size -1 \
                         --z_dim 52 \
                         --y_dim 51 \
