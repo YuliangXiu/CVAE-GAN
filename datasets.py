@@ -12,31 +12,45 @@ from PIL import Image
 
 
 im_trans = transforms.Compose([
-    transforms.Normalize([-0.05437761, -0.04876839,  0.05751688], [0.10402182, 0.09962941, 0.11785846]),
-    transforms.Normalize([-7.39823482, -7.42358403, -6.69157885], np.array([6.70985841, 6.54264821, 8.95325923])-np.array([-7.39823482, -7.42358403, -6.69157885]))
+    transforms.Normalize([-0.03210393, -0.02885828,  0.02909984], [0.10642165, 0.08386147, 0.11332943]),
+    transforms.Normalize([-10.62554399,  -9.843649  , -10.25687804], np.array([ 6.51756452,  9.55840837, 10.42095193])-np.array([-10.62554399,  -9.843649  , -10.25687804]))
 ])
 
 
 class BodyMapDataset(Dataset):
-    def __init__(self, data_root, dataset, dim=512, max_size=-1, device=None, transform=im_trans):
+    def __init__(self, data_root, dim=256, max_size=-1, device=None, transform=im_trans, cls_num=12):
         
         super(BodyMapDataset, self).__init__()
         # Set image transforms and device
         self.device = torch.device('cuda') if device is None else device
         self.transform = transform
         self.pix_dim = (dim, dim, 3)
+        self.cls_num = cls_num
         self.im_root = data_root
         
         # Prepare train/test split
-        self.names = np.loadtxt(os.path.join(self.im_root, 'input_npy.txt'), dtype=str)
+        self.names_unit = np.loadtxt(os.path.join(self.im_root, 'input_PoseUnit.txt'), dtype=str)
+        self.names_unit = np.array(["PoseUnit_stretch/"+name_unit for name_unit in self.names_unit], dtype=str)
+        self.names_random = np.loadtxt(os.path.join(self.im_root, 'input_PoseRandom.txt'), dtype=str)
+        self.names_random = np.array(["PoseRandom_stretch/"+name_random for name_random in self.names_random], dtype=str)
+        self.names = np.concatenate((self.names_unit, self.names_random), axis=0)
+        # self.names = self.names_unit
+
         self.len =  len(self.names)
-        self.im_names = [os.path.join(self.im_root, 'GT_output_npy', im_name) for im_name in self.names]
+        self.im_names = [os.path.join(self.im_root, 'npys', im_name) for im_name in self.names]
+        self.w_names = [os.path.join(self.im_root, 'weights', im_name[:-8]+".mat") for im_name in self.names]
+        
+        self.weights_stats = np.load('mean-var.npy', allow_pickle=True).item()
     
     def __getitem__(self, id):
 
-        # img = self.transform(resize(imread(self.im_names[id]), self.pix_dim[:-1]))
         img = self.transform(torch.Tensor(np.load(self.im_names[id]).transpose(2,0,1)))
-        return img
+        label = torch.FloatTensor(sio.loadmat(self.w_names[id])['theta'].flatten())
+        weights_max = torch.from_numpy(self.weights_stats['max'])
+        weights_min = torch.from_numpy(self.weights_stats['min'])
+        label_digit = torch.floor((label - weights_min)/(weights_max-weights_min+1e-6) * 10).type(torch.LongTensor)
+
+        return img, label_digit
         
     def __len__(self):
         return len(self.names)
@@ -44,7 +58,7 @@ class BodyMapDataset(Dataset):
 
 if __name__ == '__main__':
 
-    train_dataset = BodyMapDataset(data_root="./data", dataset="PoseRandom-stretch", cls_num=51, dim=256)
+    train_dataset = BodyMapDataset(data_root="./data", cls_num=51, dim=256)
     trainset_loader = DataLoader(
         dataset=train_dataset,
         batch_size=1,
@@ -53,12 +67,16 @@ if __name__ == '__main__':
         num_workers=10
     )
     from tqdm import tqdm
-    mat = torch.zeros(4150, 51)
+    # mat = torch.zeros(len(train_dataset), 51)
+    # for idx, (img, label) in enumerate(tqdm(trainset_loader)):
+    #     mat[idx] = label.flatten()
+    # np.save("mean-var.npy", {'mean':torch.mean(mat,dim=0).numpy(), 
+    #                          'std':torch.std(mat, dim=0).numpy(), 
+    #                          'max':torch.max(mat, dim=0)[0].numpy(), 
+    #                          'min':torch.min(mat, dim=0)[0].numpy()})
     for idx, (img, label) in enumerate(tqdm(trainset_loader)):
-        mat[idx] = label.flatten()
-    np.save("mean-var.npy", {'mean':torch.mean(mat,dim=0).numpy(), 'std':torch.std(mat, dim=0).numpy()})
-
-    print(torch.mean(mat, dim=0), torch.std(mat, dim=0))
+        print(label)
+    
     
     
     

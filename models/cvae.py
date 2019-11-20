@@ -37,7 +37,7 @@ class CVAE(object):
         self.mask = utils.generate_mask_guass_details("stretch" in self.dataset, self.pix_dim).to(self.device)
         
         # Load datasets
-        self.train_data = BodyMapDataset(data_root=args.data_dir, dataset=args.dataset, max_size=args.data_size, dim=args.pix_dim)
+        self.train_data = BodyMapDataset(data_root=args.data_dir, max_size=args.data_size, dim=args.pix_dim)
 
         self.sample_per_batch = len(self.train_data)/self.batch_size
         print("Trainset: %d \n"%(len(self.train_data)))
@@ -89,6 +89,7 @@ class CVAE(object):
         self.train_hist['VAE_loss'] = []
         self.train_hist['KL_loss'] = []
         self.train_hist['LL_loss'] = []
+        self.train_hist['CLS_loss'] = []
         self.train_hist['per_epoch_time'] = []
         self.train_hist['total_time'] = []
 
@@ -103,8 +104,8 @@ class CVAE(object):
         assert viz.check_connection()
 
 
-        iter_plot_loc = utils.create_loc_plot(viz, 'Iteration', 'Loss', '%s:(iter)'%(self.dataset), ['VAE', 'KL', 'LL', 'En-LL', 'En-KL'])
-        epoch_plot_loc = utils.create_loc_plot(viz, 'Epoch', 'Loss', '%s:(epoch)'%(self.dataset), ['VAE', 'KL', 'LL'])
+        iter_plot_loc = utils.create_loc_plot(viz, 'Iteration', 'Loss', '%s:(iter)'%(self.dataset), ['VAE', 'KL', 'LL', 'CLS'])
+        epoch_plot_loc = utils.create_loc_plot(viz, 'Epoch', 'Loss', '%s:(epoch)'%(self.dataset), ['VAE', 'KL', 'LL', 'CLS'])
         iter_plot_vis = utils.create_vis_plot(viz, 'Iter-Visualization', self.batch_size, self.pix_dim)
     
         start_time = time.time()
@@ -115,27 +116,37 @@ class CVAE(object):
             VAE_loss_total = []
             KL_loss_total = []
             LL_loss_total = []
+            CLS_loss_total = []
             
             self.En.train()
             self.De.train()
             
-            for iter, imgs in enumerate(self.trainset_loader):
+            for iter, (imgs, labels) in enumerate(self.trainset_loader):
                 
                 x_ = imgs.to(self.device)
+                labels = labels.to(self.device)
+                
+                temp_min = 0.5
+                ANNEAL_RATE = 0.00003
+                temp = np.maximum(1.0*np.exp(-ANNEAL_RATE*iter),temp_min)
                              
                 # update VAE network
-                dec = self.CVAE(x_)
-                KL_loss = latent_loss(self.CVAE.z_mean, self.CVAE.z_sigma)/(self.batch_size)*1.0
+                dec, qy, latent = self.CVAE(x_, temp)
+                KL_loss = latent_loss(qy)*1.0 + 4.0
                 LL_loss = self.MSE_loss(dec*self.mask, x_*self.mask)/(self.batch_size)*1e2
-                VAE_loss = LL_loss + KL_loss
+                CLS_loss = F.cross_entropy(latent.reshape(-1,10), labels.flatten(), reduction='mean')*0.1
+                
+                VAE_loss = LL_loss + KL_loss + CLS_loss
                 
                 VAE_loss_total.append(VAE_loss.item())
                 KL_loss_total.append(KL_loss.item())
                 LL_loss_total.append(LL_loss.item())
+                CLS_loss_total.append(CLS_loss.item())
 
                 self.train_hist['VAE_loss'].append(VAE_loss.item())
                 self.train_hist['KL_loss'].append(KL_loss.item())
                 self.train_hist['LL_loss'].append(LL_loss.item())
+                self.train_hist['CLS_loss'].append(CLS_loss.item())
                 
                 (LL_loss*1e2).backward(retain_graph=True)
                 En_params_LL = torch.Tensor([(param.grad**2).mean() for param in list(self.En.parameters())])
@@ -144,37 +155,28 @@ class CVAE(object):
                 En_params_KL = torch.Tensor([(param.grad**2).mean() for param in list(self.En.parameters())])
                 self.En.zero_grad()
                 
-
                 VAE_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.CVAE.parameters(), 1e-1)
                 self.CVAE_optimizer.step()
                 self.CVAE_optimizer.zero_grad()
 
                 if ((iter + 1) % (10)) == 0:
-                    print("Epoch: [%2d] [%4d/%4d] time: %4.4f VAE_loss: %.8f KL_loss: %.8f LL_loss: %.8f En_Grad_LL: %.8f En_Grad_KL: %.8f" %
+                    print("Epoch: [%2d] [%4d/%4d] time: %4.4f VAE_loss: %.8f En_Grad_LL: %.8f En_Grad_KL: %.8f" %
                           ((epoch + 1), (iter + 1), len(self.train_data) // self.batch_size, time.time() - start_time,
-                           VAE_loss.item(), KL_loss.item(), LL_loss.item(), En_params_LL.mean(), En_params_KL.mean()))
-                    utils.update_loc_plot(viz, iter_plot_loc, "iter", epoch, iter, self.sample_per_batch, [VAE_loss.item(), KL_loss.item(), LL_loss.item(), En_params_LL.mean(), En_params_KL.mean()])
+                           VAE_loss.item(), En_params_LL.mean(), En_params_KL.mean()))
+                    utils.update_loc_plot(viz, iter_plot_loc, "iter", epoch, iter, self.sample_per_batch, 
+                                          [VAE_loss.item(), KL_loss.item(), LL_loss.item(), CLS_loss.item()])
                     utils.update_vis_plot(viz, iter_plot_vis, self.batch_size, dec, x_)
+                    # self.save()
             
             if epoch % 3 == 0:
                 self.save()
-                # test samples after every epoch
                 torch.cuda.empty_cache()
-                # with torch.no_grad():
-                #     self.De.eval()
-                #     samples = self.De(self.sample_z_)
-
-                # samples = samples.detach().cpu().numpy().transpose(0, 2, 3, 1)
-                # tot_num_samples = self.sample_num * self.sample_num
-                # manifold_h = self.sample_num
-                # manifold_w = self.sample_num
-                # utils.save_images(samples[:manifold_h * manifold_w, :, :, :], [manifold_h, manifold_w], self.pix_dim,
-                #             utils.check_folder(self.result_dir + '/' + self.model_dir) + '/' + self.dataset +
-                #             '_train_{:02d}_{:04d}.png'.format(epoch, (iter + 1)))
+               
 
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
-            utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.sample_per_batch, [VAE_loss_total, KL_loss_total, LL_loss_total])
+            utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.sample_per_batch, 
+                                  [VAE_loss_total, KL_loss_total, LL_loss_total, CLS_loss_total])
 
         self.train_hist['total_time'].append(time.time() - start_time)
         print("Avg one epoch time: %.2f, total %d epochs time: %.2f" % (np.mean(self.train_hist['per_epoch_time']),
@@ -188,25 +190,18 @@ class CVAE(object):
         # change the lr
         self.CVAE_scheduler.step(torch.mean(torch.FloatTensor(VAE_loss_total)))
     
-    # random
     @staticmethod
     def gpu2cpu(tensor):
-        mean_ = np.array([-0.05437761, -0.04876839,  0.05751688]) 
-        std_ =np.array([0.10402182, 0.09962941, 0.11785846])
-        min_ = np.array([-7.39823482, -7.42358403, -6.69157885]) 
-        max_ = np.array([6.70985841, 6.54264821, 8.95325923])
+        mean_ = np.array([-0.03210393, -0.02885828,  0.02909984]) 
+        std_ =np.array([0.10642165, 0.08386147, 0.11332943])
+        min_ = np.array([-10.62554399,  -9.843649  , -10.25687804]) 
+        max_ = np.array([ 6.51756452,  9.55840837, 10.42095193])
 
-        return (tensor.detach().cpu().numpy().transpose(1,2,0)*(max_-min_)+min_)*std_+mean_
-
-    # # poseunit
-    # @staticmethod
-    # def gpu2cpu(tensor):
-    #     mean_ = np.array([-0.00985059, -0.00904417,  0.00027268]) 
-    #     std_ =np.array([0.10433362, 0.05872985, 0.0996523 ])
-    #     min_ = np.array([-11.05148387, -14.44375436, -11.41507555]) 
-    #     max_ = np.array([ 6.43471079, 13.33603401, 12.70854703])
-
-    #     return (tensor.detach().cpu().numpy().transpose(1,2,0)*(max_-min_)+min_)*std_+mean_
+        return (tensor.detach().cpu().numpy().transpose(0,2,3,1)*(max_-min_)+min_)*std_+mean_
+    
+    @staticmethod
+    def gpu2img(tensor):
+        return tensor.detach().cpu().numpy().transpose(0,2,3,1)*255.0
 
 
     def test(self, flag='ED'):

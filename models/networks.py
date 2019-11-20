@@ -10,6 +10,7 @@ from torch.nn import init
 from torch.optim import lr_scheduler
 from cv2 import imread, imwrite, connectedComponents
 from torchsummary import summary
+from torch.nn import functional as F
 from models.utils import *
 
 
@@ -17,34 +18,47 @@ class CVAE_T(torch.nn.Module):
     def __init__(self, args, encoder, decoder):
         super(CVAE_T, self).__init__()
         self.z_dim = args.z_dim
+        self.cls_dim = 10
         self.encoder = encoder
         self.decoder = decoder
         self.device = args.device
+    
+    @staticmethod
+    def sample_gumbel(shape, eps=1e-20):
+        U = torch.rand(shape).cuda()
+        return - torch.log(-torch.log(U + eps) + eps)
 
-    def _sample_latent(self, h_enc):
+    def gumbel_softmax_sample(self, logits, temperature):
+        y = logits + self.sample_gumbel(logits.size())
+        return F.softmax(y / temperature, dim=-1)
+
+    def gumbel_softmax(self, logits, temperature):
         """
-        Return the latent normal sample z ~ N(mu, sigma^2)
+        ST-gumple-softmax
+        input: [*, n_class]
+        return: flatten --> [*, n_class] an one-hot vector
         """
-        # print(h_enc.shape)
-        mu = h_enc[:, :self.z_dim]
-        log_sigma = h_enc[:, self.z_dim:]
-        sigma = torch.exp(log_sigma)
-        std_z = torch.from_numpy(np.random.normal(0, 1, size=sigma.size())).type(torch.FloatTensor).to(self.device)
+        y = self.gumbel_softmax_sample(logits, temperature)
+        shape = y.size()
+        _, ind = y.max(dim=-1)
+        y_hard = torch.zeros_like(y).view(-1, shape[-1])
+        y_hard.scatter_(1, ind.view(-1, 1), 1)
+        y_hard = y_hard.view(*shape)
+        y_hard = (y_hard - y).detach() + y
+        
+        return y_hard.view(-1, self.z_dim * self.cls_dim)
 
-        self.z_mean = mu
-        self.z_sigma = sigma
-
-        return mu + sigma * std_z
-
-    def forward(self, state):
+    def forward(self, state, temp):
         h_enc = self.encoder(state)
-        z = self._sample_latent(h_enc)
-        return self.decoder(z)
+        h_enc_digit = h_enc.view(h_enc.size(0), self.z_dim, self.cls_dim)
+        z = self.gumbel_softmax(h_enc_digit, temp)
+        return self.decoder(z), F.softmax(h_enc,dim=1), h_enc_digit
 
-def latent_loss(z_mean, z_stddev):
-    mean_sq = z_mean * z_mean
-    stddev_sq = z_stddev * z_stddev
-    return torch.mean(mean_sq + stddev_sq - torch.log(1e-8 + stddev_sq) - 1)
+def latent_loss(qy):
+    log_qy = torch.log(qy+1e-20)
+    g = torch.log(torch.Tensor([1.0/10])).cuda()
+    KLD = torch.sum(qy*(log_qy - g),dim=-1).mean()
+    return KLD
 
 class decoder(nn.Module):
     # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
@@ -52,12 +66,13 @@ class decoder(nn.Module):
     def __init__(self, args, dataset='1101'):
         super(decoder, self).__init__()
         self.z_dim = args.z_dim
+        self.cls_num = 10
         self.norm_layer = get_norm_layer(layer_type='batch')
         self.nl_layer = get_non_linearity(layer_type='lrelu')
         self.pix_dim = args.pix_dim
         self.in_dim = args.z_dim
 
-        self.decoder = ConvResDecoder(self.pix_dim, self.in_dim, 64, 6, self.norm_layer, self.nl_layer)
+        self.decoder = ConvResDecoder(self.pix_dim, self.z_dim*self.cls_num, 64, 6, self.norm_layer, self.nl_layer)
         init_net(self.decoder, 'kaiming')
       
     def forward(self, input):
@@ -72,13 +87,14 @@ class encoder(nn.Module):
     def __init__(self, args, dataset = '1101'):
         super(encoder, self).__init__()
 
-        self.z_dim = args.z_dim * 2
+        self.z_dim = args.z_dim
+        self.cls_num = 10
         self.norm_layer = get_norm_layer(layer_type='batch')
         self.nl_layer = get_non_linearity(layer_type='lrelu')
         self.pix_dim = args.pix_dim
         self.in_dim = 3
 
-        self.encoder = ResNetEncoder(self.pix_dim, self.in_dim, self.z_dim, 64, 6, self.norm_layer, self.nl_layer)
+        self.encoder = ResNetEncoder(self.pix_dim, self.in_dim, self.z_dim*self.cls_num, 64, 6, self.norm_layer, self.nl_layer)
         init_net(self.encoder, 'kaiming')
 
     def forward(self, input):
