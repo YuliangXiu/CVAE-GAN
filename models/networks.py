@@ -18,61 +18,27 @@ class CVAE_T(torch.nn.Module):
     def __init__(self, args, encoder, decoder):
         super(CVAE_T, self).__init__()
         self.z_dim = args.z_dim
-        self.cls_dim = 10
         self.encoder = encoder
         self.decoder = decoder
         self.device = args.device
-    
-    @staticmethod
-    def sample_gumbel(shape, eps=1e-20):
-        U = torch.rand(shape).cuda()
-        return - torch.log(-torch.log(U + eps) + eps)
 
-    def gumbel_softmax_sample(self, logits, temperature):
-        y = logits + self.sample_gumbel(logits.size())
-        return F.softmax(y / temperature, dim=-1)
-
-    def gumbel_softmax(self, logits, temperature):
-        """
-        ST-gumple-softmax
-        input: [*, n_class]
-        return: flatten --> [*, n_class] an one-hot vector
-        """
-        y = self.gumbel_softmax_sample(logits, temperature)
-        shape = y.size()
-        _, ind = y.max(dim=-1)
-        y_hard = torch.zeros_like(y).view(-1, shape[-1])
-        y_hard.scatter_(1, ind.view(-1, 1), 1)
-        y_hard = y_hard.view(*shape)
-        y_hard = (y_hard - y).detach() + y
-        
-        return y_hard.view(-1, self.z_dim * self.cls_dim)
-
-    def forward(self, state, temp):
-        h_enc = self.encoder(state)
-        h_enc_digit = h_enc.view(h_enc.size(0), self.z_dim, self.cls_dim)
-        z = self.gumbel_softmax(h_enc_digit, temp)
-        return self.decoder(z), F.softmax(h_enc,dim=1), h_enc_digit
-
-def latent_loss(qy):
-    log_qy = torch.log(qy+1e-20)
-    g = torch.log(torch.Tensor([1.0/10])).cuda()
-    KLD = torch.sum(qy*(log_qy - g),dim=-1).mean()
-    return KLD
+    def forward(self, input, label):
+        enc = self.encoder(input)
+        dec = self.decoder(label)
+        return enc, dec
 
 class decoder(nn.Module):
     # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
     # Architecture : FC1024_BR-FC7x7x128_BR-(64)4dc2s_BR-(1)4dc2s_S
-    def __init__(self, args, dataset='1101'):
+    def __init__(self, args):
         super(decoder, self).__init__()
         self.z_dim = args.z_dim
-        self.cls_num = 10
         self.norm_layer = get_norm_layer(layer_type='batch')
         self.nl_layer = get_non_linearity(layer_type='lrelu')
         self.pix_dim = args.pix_dim
         self.in_dim = args.z_dim
 
-        self.decoder = ConvResDecoder(self.pix_dim, self.z_dim*self.cls_num, 64, 6, self.norm_layer, self.nl_layer)
+        self.decoder = ConvResDecoder(self.pix_dim, self.z_dim, 64, 6, self.norm_layer, self.nl_layer)
         init_net(self.decoder, 'kaiming')
       
     def forward(self, input):
@@ -84,17 +50,16 @@ class decoder(nn.Module):
 class encoder(nn.Module):
     # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
     # Architecture : (64)4c2s-(128)4c2s_BL-FC1024_BL-FC1_S
-    def __init__(self, args, dataset = '1101'):
+    def __init__(self, args):
         super(encoder, self).__init__()
 
         self.z_dim = args.z_dim
-        self.cls_num = 10
         self.norm_layer = get_norm_layer(layer_type='batch')
         self.nl_layer = get_non_linearity(layer_type='lrelu')
         self.pix_dim = args.pix_dim
         self.in_dim = 3
 
-        self.encoder = ResNetEncoder(self.pix_dim, self.in_dim, self.z_dim*self.cls_num, 64, 6, self.norm_layer, self.nl_layer)
+        self.encoder = ResNetEncoder(self.pix_dim, self.in_dim, self.z_dim, 64, 6, self.norm_layer, self.nl_layer)
         init_net(self.encoder, 'kaiming')
 
     def forward(self, input):
@@ -141,40 +106,6 @@ class ConvResDecoder(nn.Module):
         x = x.view(x.shape[0], -1, self.im_size, self.im_size)
         return self.conv(x)
 
-class ConvUpSampleDecoder(nn.Module):
-    '''
-        SimpleDecoder
-    '''
-    def __init__(self, im_size, nz, ngf=64, nup=6,
-        norm_layer=None, nl_layer=None):
-        super(ConvUpSampleDecoder, self).__init__()
-        self.im_size = im_size // (2 ** nup)
-        fc_dim = 4 * nz
-        
-        layers = []
-        prev = 8
-        for i in range(nup-1, -1, -1):
-            cur = min(prev, 2**i)
-            layers.append(deconv3x3(ngf * prev, ngf * cur, stride=2))
-            prev = cur
-        
-        layers += [
-            nn.ReflectionPad2d(3),
-            nn.Conv2d(ngf, 3, kernel_size=7, stride=1, padding=0),
-            nn.Sigmoid(),
-        ]
-        self.conv = nn.Sequential(*layers)
-        self.fc = nn.Sequential(
-            nn.Linear(nz, fc_dim),
-            nl_layer,
-            nn.Dropout(),
-            nn.Linear(fc_dim, self.im_size * self.im_size * ngf * 8),
-        )
-        
-    def forward(self, x):
-        x = self.fc(x)
-        x = x.view(x.shape[0], -1, self.im_size, self.im_size)
-        return self.conv(x)
 
 class ResNetEncoder(nn.Module):
     def __init__(self, im_size, in_dim, nz=256, ngf=64, ndown=6,
@@ -257,11 +188,13 @@ class BasicResBlock(nn.Module):
     def forward(self, x):
         return self.res(x) + x
 
-
 def conv3x3(in_planes, out_planes, stride=1):
-    """3x3 convolution with padding"""
-    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                     padding=1, bias=False)
+    
+    return nn.Sequential(
+        nn.Conv2d(in_channels=in_planes, out_channels=out_planes, kernel_size=3, stride=stride, padding=1),
+        nn.BatchNorm2d(out_planes),
+        nn.LeakyReLU(0.2, True)
+    )
 
 def initialize_weights(net):
     for m in net.modules():
@@ -287,12 +220,11 @@ class Interpolate(nn.Module):
         return x
 
 def deconv3x3(in_planes, out_planes, stride=1):
-
+    
     return nn.Sequential(
-        Interpolate(scale_factor=stride, mode='bilinear'),
-        nn.ReflectionPad2d(1),
-        nn.Conv2d(in_planes, out_planes,
-                  kernel_size=3, stride=1, padding=0)
+        nn.ConvTranspose2d(in_channels=in_planes, out_channels=out_planes, kernel_size=3, stride=stride, padding=1, output_padding=1),
+        nn.BatchNorm2d(out_planes),
+        nn.LeakyReLU(0.2, True)
     )
 
 def init_weights(net, init_type='normal', gain=0.02):

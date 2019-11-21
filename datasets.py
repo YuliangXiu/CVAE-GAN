@@ -48,9 +48,9 @@ class BodyMapDataset(Dataset):
         label = torch.FloatTensor(sio.loadmat(self.w_names[id])['theta'].flatten())
         weights_max = torch.from_numpy(self.weights_stats['max'])
         weights_min = torch.from_numpy(self.weights_stats['min'])
-        label_digit = torch.floor((label - weights_min)/(weights_max-weights_min+1e-6) * 10).type(torch.LongTensor)
+        label = (label - weights_min)/(weights_max-weights_min+1e-6)
 
-        return img, label_digit
+        return img, label
         
     def __len__(self):
         return len(self.names)
