@@ -21,6 +21,21 @@ class CVAE_T(torch.nn.Module):
         self.decoder = decoder
         self.device = args.device
 
+    # def _sample_latent(self, h_enc):
+    #     """
+    #     Return the latent normal sample z ~ N(mu, sigma^2)
+    #     """
+    #     # print(h_enc.shape)
+    #     mu = h_enc[:, :self.z_dim]
+    #     log_sigma = h_enc[:, self.z_dim:]
+    #     sigma = torch.exp(log_sigma)
+    #     std_z = torch.from_numpy(np.random.normal(0, 1, size=sigma.size())).type(torch.FloatTensor).to(self.device)
+
+    #     self.z_mean = mu
+    #     self.z_sigma = sigma
+
+    #     return mu + sigma * std_z
+
     def forward(self, input, label):
         enc = self.encoder(input)
         dec = self.decoder(enc)

@@ -1,5 +1,6 @@
 import torch, time, random, os, pickle
 import numpy as np
+import cv2
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -150,12 +151,12 @@ class CVAE(object):
                 self.train_hist['CLS_loss'].append(CLS_loss.item())
                 self.train_hist['PG_loss'].append(PG_loss.item())
                 
-                LL_loss.backward(retain_graph=True) 
-                CLS_loss.backward(retain_graph=True)
-                PG_loss.backward()
-
                 # LL_loss.backward(retain_graph=True) 
-                # CLS_loss.backward()
+                # CLS_loss.backward(retain_graph=True)
+                # PG_loss.backward()
+
+                LL_loss.backward(retain_graph=True) 
+                CLS_loss.backward()
 
                 self.CVAE_optimizer.step()
                 self.CVAE_optimizer.zero_grad()
@@ -192,12 +193,13 @@ class CVAE(object):
     
     @staticmethod
     def gpu2cpu(tensor):
+
         mean_ = np.array([-0.03210393, -0.02885828,  0.02909984]) 
         std_ =np.array([0.10642165, 0.08386147, 0.11332943])
         min_ = np.array([-10.62554399,  -9.843649  , -10.25687804]) 
         max_ = np.array([ 6.51756452,  9.55840837, 10.42095193])
 
-        return (tensor.detach().cpu().numpy().transpose(0,2,3,1)*(max_-min_)+min_)*std_+mean_
+        return (tensor.detach().cpu().numpy().transpose(1,2,0)*(max_-min_)+min_)*std_+mean_
     
     @staticmethod
     def gpu2img(tensor):
@@ -218,13 +220,15 @@ class CVAE(object):
                 middle_num = 10
                 outs = []
                 ins = []
-                for iter, imgs in enumerate(self.trainset_loader):
+                for iter, (imgs, labels) in enumerate(self.trainset_loader):
+
                     x_ = imgs.to(self.device)
                     latent_vec = self.En(x_)
+
                     pair = list(itertools.combinations(range(self.batch_size),2))
                     for (start,end) in pair:
                         comb = np.zeros((4+middle_num, 256, 256, 3))
-                        comb_latent = torch.zeros(2+middle_num, 52*2)
+                        comb_latent = torch.zeros(2+middle_num, 51)
                         
                         start_vec = latent_vec[start][None, ...]
                         end_vec = latent_vec[end][None, ...]
@@ -233,14 +237,14 @@ class CVAE(object):
                         comb_latent[0] = start_vec
                         comb_latent[-1] = end_vec
 
-                        start_img = self.De(self.CVAE._sample_latent(start_vec))
-                        end_img = self.De(self.CVAE._sample_latent(end_vec))
+                        start_img = self.De(start_vec)
+                        end_img = self.De(end_vec)
 
                         comb[0], comb[1], comb[-2], comb[-1] = self.gpu2cpu(x_[start]), self.gpu2cpu(start_img[0]), self.gpu2cpu(end_img[0]), self.gpu2cpu(x_[end])
 
                         for mid in range(middle_num):
                             mid_vec = end_vec * ((mid+1)/middle_num) + start_vec * ((middle_num-mid-1)/middle_num)
-                            middle_img = self.De(self.CVAE._sample_latent(mid_vec))
+                            middle_img = self.De(mid_vec)
                             comb[2+mid] = self.gpu2cpu(middle_img[0])
 
                             comb_latent[1+mid] = mid_vec
@@ -287,5 +291,5 @@ class CVAE(object):
         else:
             self.En.module.load_state_dict(torch.load(pkl + '_encoder.pkl'))
             self.De.module.load_state_dict(torch.load(pkl + '_decoder.pkl'))
-            self.De.module.load_state_dict(torch.load(pkl + '_patchD.pkl'))
+            self.PG.module.load_state_dict(torch.load(pkl + '_patchD.pkl'))
 
