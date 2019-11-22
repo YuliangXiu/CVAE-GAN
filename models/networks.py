@@ -4,14 +4,13 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from datasets import BodyMapDataset
 from torch.utils.data import DataLoader
 from torch.nn import init
 from torch.optim import lr_scheduler
 from cv2 import imread, imwrite, connectedComponents
 from torchsummary import summary
 from torch.nn import functional as F
-from models.utils import *
+import functools
 
 
 class CVAE_T(torch.nn.Module):
@@ -24,7 +23,7 @@ class CVAE_T(torch.nn.Module):
 
     def forward(self, input, label):
         enc = self.encoder(input)
-        dec = self.decoder(label)
+        dec = self.decoder(enc)
         return enc, dec
 
 class decoder(nn.Module):
@@ -140,6 +139,53 @@ class ResNetEncoder(nn.Module):
         x = self.conv(x)
         x = x.view(x.shape[0], -1)
         return self.fc(x)
+
+class NLayerDiscriminator(nn.Module):
+    """Defines a PatchGAN discriminator"""
+
+    def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d):
+        """Construct a PatchGAN discriminator
+
+        Parameters:
+            input_nc (int)  -- the number of channels in input images
+            ndf (int)       -- the number of filters in the last conv layer
+            n_layers (int)  -- the number of conv layers in the discriminator
+            norm_layer      -- normalization layer
+        """
+        super(NLayerDiscriminator, self).__init__()
+        if type(norm_layer) == functools.partial:  # no need to use bias as BatchNorm2d has affine parameters
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+
+        kw = 4
+        padw = 1
+        sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=2, padding=padw), nn.LeakyReLU(0.2, True)]
+        nf_mult = 1
+        nf_mult_prev = 1
+        for n in range(1, n_layers):  # gradually increase the number of filters
+            nf_mult_prev = nf_mult
+            nf_mult = min(2 ** n, 8)
+            sequence += [
+                nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult, kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+                norm_layer(ndf * nf_mult),
+                nn.LeakyReLU(0.2, True)
+            ]
+
+        nf_mult_prev = nf_mult
+        nf_mult = min(2 ** n_layers, 8)
+        sequence += [
+            nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult, kernel_size=kw, stride=1, padding=padw, bias=use_bias),
+            norm_layer(ndf * nf_mult),
+            nn.LeakyReLU(0.2, True)
+        ]
+
+        sequence += [nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw)]  # output 1 channel prediction map
+        self.model = nn.Sequential(*sequence)
+
+    def forward(self, input):
+        """Standard forward."""
+        return self.model(input)
 
 class ConvResBlock(nn.Module):
     def __init__(self, inplanes, planes, direction, stride=1,
@@ -294,3 +340,11 @@ def get_non_linearity(layer_type='relu'):
         raise NotImplementedError(
             'nonlinearity activitation [%s] is not found' % layer_type)
     return nl_layer
+
+if __name__ == '__main__':
+    from torch_receptive_field import receptive_field
+
+    net = NLayerDiscriminator(input_nc=3).cuda()
+    summary(net, (3,286,286))
+    receptive_field(net, input_size=(3, 286, 286))
+    

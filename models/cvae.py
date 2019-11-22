@@ -54,6 +54,7 @@ class CVAE(object):
         # networks init
         self.En = nn.DataParallel(encoder(args))
         self.De = nn.DataParallel(decoder(args))
+        self.PG = nn.DataParallel(NLayerDiscriminator(input_nc=3)).to(self.device)
         self.CVAE = CVAE_T(args, self.En, self.De)
         
         if args.resume:
@@ -63,7 +64,8 @@ class CVAE(object):
             self.load(args.pkl)         
             
         self.CVAE_optimizer = optim.Adam([{'params': self.En.parameters(), 'lr' : 1e-4},
-                                         {'params': self.De.parameters(), 'lr': 1e-4}], 
+                                         {'params': self.De.parameters(), 'lr': 1e-4},
+                                         {'params': self.PG.parameters(), 'lr': 1e-3}], 
                                          lr=args.lrG, betas=(0.5, 0.999), eps=1e-08, weight_decay=1e-6)
         # self.CVAE_optimizer = optim.SGD(self.CVAE.parameters(), lr=args.lrG, momentum=0.9, weight_decay=1e-4)
         # self.CVAE_scheduler = torch.optim.lr_scheduler.StepLR(self.CVAE_optimizer, step_size=50, gamma=0.3)
@@ -89,6 +91,7 @@ class CVAE(object):
         self.train_hist = {}
         self.train_hist['LL_loss'] = []
         self.train_hist['CLS_loss'] = []
+        self.train_hist['PG_loss'] = []
         self.train_hist['per_epoch_time'] = []
         self.train_hist['total_time'] = []
 
@@ -103,8 +106,8 @@ class CVAE(object):
         assert viz.check_connection()
 
 
-        iter_plot_loc = utils.create_loc_plot(viz, 'Iteration', 'Loss', '%s:(iter)'%(self.dataset), ['LL', 'CLS'])
-        epoch_plot_loc = utils.create_loc_plot(viz, 'Epoch', 'Loss', '%s:(epoch)'%(self.dataset), ['LL', 'CLS'])
+        iter_plot_loc = utils.create_loc_plot(viz, 'Iteration', 'Loss', '%s:(iter)'%(self.dataset), ['LL', 'CLS', 'PG'])
+        epoch_plot_loc = utils.create_loc_plot(viz, 'Epoch', 'Loss', '%s:(epoch)'%(self.dataset), ['LL', 'CLS', 'PG'])
         iter_plot_vis = utils.create_vis_plot(viz, 'Iter-Visualization', self.batch_size, self.pix_dim)
     
         start_time = time.time()
@@ -115,6 +118,7 @@ class CVAE(object):
             
             LL_loss_total = []
             CLS_loss_total = []
+            PG_loss_total = []
             
             self.En.train()
             self.De.train()
@@ -126,31 +130,42 @@ class CVAE(object):
                              
                 # update VAE network
                 enc, dec = self.CVAE(x_, labels)
+                PG_fake = self.PG(dec)
+                PG_real = self.PG(x_)
 
                 # summary(self.En.module, (3,256,256))
                 # summary(self.De.module, (510,))
                 
-                LL_loss = self.MSE_loss(dec*self.mask, x_*self.mask)
+                LL_loss = self.L1_loss(dec*self.mask, x_*self.mask)/18.0
                 CLS_loss = self.MSE_loss(enc, labels)
+                PG_real_loss = self.L1_loss(PG_real, torch.Tensor([1.0]).expand_as(PG_real).to(self.device))
+                PG_fake_loss = self.L1_loss(PG_fake, torch.Tensor([0.0]).expand_as(PG_fake).to(self.device))
+                PG_loss = (PG_real_loss +  PG_fake_loss)*0.5
                                 
                 LL_loss_total.append(LL_loss.item())
                 CLS_loss_total.append(CLS_loss.item())
+                PG_loss_total.append(PG_loss.item())
 
                 self.train_hist['LL_loss'].append(LL_loss.item())
                 self.train_hist['CLS_loss'].append(CLS_loss.item())
+                self.train_hist['PG_loss'].append(PG_loss.item())
                 
-                LL_loss.backward() 
-                CLS_loss.backward()
+                LL_loss.backward(retain_graph=True) 
+                CLS_loss.backward(retain_graph=True)
+                PG_loss.backward()
+
+                # LL_loss.backward(retain_graph=True) 
+                # CLS_loss.backward()
 
                 self.CVAE_optimizer.step()
                 self.CVAE_optimizer.zero_grad()
 
                 if ((iter + 1) % (10)) == 0:
-                    print("Epoch: [%2d] [%4d/%4d] time: %4.4f LL_loss: %.8f CLS_loss: %.8f" %
+                    print("Epoch: [%2d] [%4d/%4d] time: %4.4f LL_loss: %.8f CLS_loss: %.8f PG_loss: %.8f" %
                           ((epoch + 1), (iter + 1), len(self.train_data) // self.batch_size, time.time() - start_time,
-                           LL_loss.item(), CLS_loss.item()))
+                           LL_loss.item(), CLS_loss.item(), PG_loss.item()))
                     utils.update_loc_plot(viz, iter_plot_loc, "iter", epoch, iter, self.sample_per_batch, 
-                                          [LL_loss.item(), CLS_loss.item()])
+                                          [LL_loss.item(), CLS_loss.item(), PG_loss.item()])
                     utils.update_vis_plot(viz, iter_plot_vis, self.batch_size, dec, x_)
                     # self.save()
             
@@ -161,7 +176,7 @@ class CVAE(object):
 
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
             utils.update_loc_plot(viz, epoch_plot_loc, "epoch", epoch, iter, self.sample_per_batch, 
-                                  [LL_loss_total, CLS_loss_total])
+                                  [LL_loss_total, CLS_loss_total, PG_loss_total])
 
         self.train_hist['total_time'].append(time.time() - start_time)
         print("Avg one epoch time: %.2f, total %d epochs time: %.2f" % (np.mean(self.train_hist['per_epoch_time']),
@@ -258,6 +273,7 @@ class CVAE(object):
 
         torch.save(self.En.module.state_dict(), os.path.join(save_dir, self.dataset + '_encoder.pkl'))
         torch.save(self.De.module.state_dict(), os.path.join(save_dir, self.dataset + '_decoder.pkl'))
+        torch.save(self.PG.module.state_dict(), os.path.join(save_dir, self.dataset + '_patchD.pkl'))
 
         with open(os.path.join(save_dir, self.dataset + '_history.pkl'), 'wb') as f:
             pickle.dump(self.train_hist, f)
@@ -267,7 +283,9 @@ class CVAE(object):
             save_dir = os.path.join(self.save_dir, self.model_dir)
             self.En.module.load_state_dict(torch.load(os.path.join(save_dir, self.dataset + '_encoder.pkl')))
             self.De.module.load_state_dict(torch.load(os.path.join(save_dir, self.dataset + '_decoder.pkl')))
+            self.PG.module.load_state_dict(torch.load(os.path.join(save_dir, self.dataset + '_patchD.pkl')))
         else:
             self.En.module.load_state_dict(torch.load(pkl + '_encoder.pkl'))
             self.De.module.load_state_dict(torch.load(pkl + '_decoder.pkl'))
+            self.De.module.load_state_dict(torch.load(pkl + '_patchD.pkl'))
 

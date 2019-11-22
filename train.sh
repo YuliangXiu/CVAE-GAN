@@ -1,7 +1,7 @@
-python starter.py --dataset "VAE_NPY_stretch_CLS_newnet" \
+python starter.py --dataset "L1_CLS_patchD" \
                         --data_dir "./data" \
                         --epoch 5000 \
-                        --batch_size 24 \
+                        --batch_size 20 \
                         --data_size -1 \
                         --z_dim 51 \
                         --pix_dim 256 \
